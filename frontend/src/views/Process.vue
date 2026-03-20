@@ -1616,7 +1616,7 @@ onUnmounted(() => {
   word-break: break-word;
 }
 
-/* Episodes 列表 */
+/* Episodes List */
 .episodes-list {
   margin-top: 8px;
   display: flex;
@@ -1641,7 +1641,7 @@ onUnmounted(() => {
   margin-bottom: 10px;
 }
 
-/* 图谱图例 */
+/* Graph Legend */
 .graph-legend {
   display: flex;
   flex-wrap: wrap;
@@ -1672,7 +1672,7 @@ onUnmounted(() => {
   color: #999;
 }
 
-/* 右侧面板 - 50% default */
+/* Right Panel - 50% default */
 .right-panel {
   width: 50%;
   flex: none;
@@ -1702,14 +1702,14 @@ onUnmounted(() => {
   margin-right: 8px;
 }
 
-/* 流程内容 */
+/* Process Content */
 .process-content {
   flex: 1;
   overflow-y: auto;
   padding: 24px;
 }
 
-/* 流程阶段 */
+/* Process Stages */
 .process-phase {
   margin-bottom: 24px;
   border: 1px solid #E0E0E0;
@@ -1795,12 +1795,12 @@ onUnmounted(() => {
   color: #fff;
 }
 
-/* 阶段详情 */
+/* Stage Details */
 .phase-detail {
   padding: 16px;
 }
 
-/* 实体标签 */
+/* Entity Tags */
 .entity-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1815,7 +1815,7 @@ onUnmounted(() => {
   color: #333;
 }
 
-/* 关系列表 */
+/* Relationships List */
 .relation-list {
   font-size: 0.8rem;
 }
@@ -1852,7 +1852,7 @@ onUnmounted(() => {
   font-size: 0.75rem;
 }
 
-/* 本体生成进度 */
+/* Ontology Generation Progress */
 .ontology-progress {
   display: flex;
   align-items: center;
@@ -1876,7 +1876,7 @@ onUnmounted(() => {
   color: #333;
 }
 
-/* 等待状态 */
+/* Waiting State */
 .waiting-state {
   padding: 16px;
   background: #F9F9F9;
@@ -1889,7 +1889,7 @@ onUnmounted(() => {
   color: #999;
 }
 
-/* 进度条 */
+/* Progress Bar */
 .progress-bar {
   height: 6px;
   background: #E0E0E0;
@@ -1918,7 +1918,7 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-/* 构建结果 */
+/* Build Results */
 .build-result {
   display: flex;
   gap: 16px;
@@ -1946,7 +1946,7 @@ onUnmounted(() => {
   letter-spacing: 0.05em;
 }
 
-/* 下一步按钮 */
+/* Next Step Button */
 .next-step-section {
   margin-top: 24px;
   padding-top: 24px;
@@ -1983,7 +1983,7 @@ onUnmounted(() => {
   font-size: 1.2rem;
 }
 
-/* 项目信息面板 */
+/* Project Info Panel */
 .project-panel {
   border-top: 1px solid #E0E0E0;
   background: #FAFAFA;
@@ -2041,7 +2041,7 @@ onUnmounted(() => {
   color: #666;
 }
 
-/* 响应式 */
+/* Responsive */
 @media (max-width: 1024px) {
   .main-content {
     flex-direction: column;

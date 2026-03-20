@@ -548,7 +548,7 @@ class SimulationConfigGenerator:
 Please generate a time configuration JSON.
 
 ### Basic Principles (for reference only, adjust flexibly based on specific events and participant groups):
-- The user base is Chinese, must follow Beijing Time daily schedule
+- Follow a typical daily activity schedule
 - Midnight 0-5am almost no activity (activity coefficient 0.05)
 - Morning 6-8am gradually active (activity coefficient 0.4)
 - Work hours 9am-6pm moderately active (activity coefficient 0.7)
@@ -585,7 +585,7 @@ Field descriptions:
 - work_hours (int array): Work hours
 - reasoning (string): Brief explanation of why this configuration was chosen"""
 
-        system_prompt = "You are a social media simulation expert. Return pure JSON format; time configuration must follow Chinese daily schedule."
+        system_prompt = "You are a social media simulation expert. Return pure JSON format; time configuration must follow a typical daily activity schedule."
 
         try:
             return self._call_llm_with_retry(prompt, system_prompt)
@@ -594,7 +594,7 @@ Field descriptions:
             return self._get_default_time_config(num_entities)
 
     def _get_default_time_config(self, num_entities: int) -> Dict[str, Any]:
-        """Get default time configuration (Chinese daily schedule)"""
+        """Get default time configuration (typical daily schedule)"""
         return {
             "total_simulation_hours": 72,
             "minutes_per_round": 60,  # 1 hour per round, faster time flow
@@ -604,7 +604,7 @@ Field descriptions:
             "off_peak_hours": [0, 1, 2, 3, 4, 5],
             "morning_hours": [6, 7, 8],
             "work_hours": [9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
-            "reasoning": "Using default Chinese daily schedule configuration (1 hour per round)"
+            "reasoning": "Using default daily schedule configuration (1 hour per round)"
         }
 
     def _parse_time_config(self, result: Dict[str, Any], num_entities: int) -> TimeSimulationConfig:
@@ -839,7 +839,7 @@ Simulation requirement: {simulation_requirement}
 
 ## Task
 Generate activity configuration for each entity, note:
-- **Time follows Chinese daily schedule**: Midnight 0-5am almost no activity, evening 7-10pm most active
+- **Time follows typical daily schedule**: Midnight 0-5am almost no activity, evening 7-10pm most active
 - **Official institutions** (University/GovernmentAgency): Low activity (0.1-0.3), active during work hours (9-17), slow response (60-240 min), high influence (2.5-3.0)
 - **Media** (MediaOutlet): Medium activity (0.4-0.6), active all day (8-23), fast response (5-30 min), high influence (2.0-2.5)
 - **Individuals** (Student/Person/Alumni): High activity (0.6-0.9), mainly active in evening (18-23), fast response (1-15 min), low influence (0.8-1.2)
@@ -853,7 +853,7 @@ Return JSON format (no markdown):
             "activity_level": <0.0-1.0>,
             "posts_per_hour": <posting frequency>,
             "comments_per_hour": <commenting frequency>,
-            "active_hours": [<active hours list, considering Chinese daily schedule>],
+            "active_hours": [<active hours list, considering typical daily schedule>],
             "response_delay_min": <minimum response delay in minutes>,
             "response_delay_max": <maximum response delay in minutes>,
             "sentiment_bias": <-1.0 to 1.0>,
@@ -864,7 +864,7 @@ Return JSON format (no markdown):
     ]
 }}"""
 
-        system_prompt = "You are a social media behavior analysis expert. Return pure JSON; configuration must follow Chinese daily schedule."
+        system_prompt = "You are a social media behavior analysis expert. Return pure JSON; configuration must follow a typical daily activity schedule."
 
         try:
             result = self._call_llm_with_retry(prompt, system_prompt)

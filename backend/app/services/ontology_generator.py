@@ -66,7 +66,7 @@ Please output JSON format with the following structure:
             "attributes": []
         }
     ],
-    "analysis_summary": "Brief analysis summary of the text content (in Chinese)"
+    "analysis_summary": "Brief analysis summary of the text content (in English)"
 }
 ```
 
