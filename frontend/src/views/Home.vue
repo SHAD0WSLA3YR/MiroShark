@@ -199,6 +199,9 @@
         </div>
       </section>
 
+      <!-- Quick Start Templates -->
+      <TemplateGallery />
+
       <!-- History Project Database -->
       <HistoryDatabase />
 
@@ -214,6 +217,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import HistoryDatabase from '../components/HistoryDatabase.vue'
+import TemplateGallery from '../components/TemplateGallery.vue'
 
 const router = useRouter()
 
