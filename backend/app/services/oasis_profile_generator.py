@@ -19,6 +19,7 @@ from ..config import Config
 from ..utils.llm_client import create_llm_client
 from ..utils.logger import get_logger
 from .entity_reader import EntityNode
+from .web_enrichment import WebEnricher
 from ..storage import GraphStorage
 
 logger = get_logger('miroshark.oasis_profile')
@@ -160,6 +161,53 @@ class OasisAgentProfile:
         }
 
 
+def _social_metrics_for_entity_type(entity_type: str, entity=None) -> Dict[str, int]:
+    """Derive social media metrics from entity type and graph structure.
+
+    Replaces the previous random.randint() fallbacks with values grounded in
+    the entity's structural role. An institutional media outlet should have
+    high follower counts; a student should have modest ones.
+
+    If the entity has related_edges (from the knowledge graph), the degree
+    (number of connections) is used as a scaling factor — more connected
+    entities get proportionally higher metrics.
+    """
+    # Use graph degree as a scaling factor (1.0 = baseline, up to ~3.0 for hubs)
+    degree = 1
+    if entity and hasattr(entity, 'related_edges') and entity.related_edges:
+        degree = len(entity.related_edges)
+    elif entity and hasattr(entity, 'attributes') and isinstance(entity.attributes, dict):
+        degree = entity.attributes.get('degree', 1)
+    degree_factor = min(3.0, 1.0 + (degree - 1) * 0.15)
+
+    et = entity_type.lower()
+
+    # Base metrics by entity archetype
+    if et in ("mediaoutlet", "socialmediaplatform"):
+        base = {"karma": 15000, "friend_count": 200, "follower_count": 50000, "statuses_count": 10000}
+    elif et in ("university", "governmentagency", "organization", "ngo"):
+        base = {"karma": 8000, "friend_count": 150, "follower_count": 20000, "statuses_count": 5000}
+    elif et in ("publicfigure", "expert", "faculty"):
+        base = {"karma": 5000, "friend_count": 300, "follower_count": 8000, "statuses_count": 3000}
+    elif et in ("student", "alumni"):
+        base = {"karma": 800, "friend_count": 200, "follower_count": 300, "statuses_count": 500}
+    elif et in ("politician", "official", "regulator"):
+        base = {"karma": 6000, "friend_count": 250, "follower_count": 15000, "statuses_count": 4000}
+    else:
+        base = {"karma": 1500, "friend_count": 120, "follower_count": 500, "statuses_count": 800}
+
+    # Scale by graph degree and add small deterministic jitter from entity name hash
+    name_hash = 0
+    if entity and hasattr(entity, 'name') and entity.name:
+        name_hash = hash(entity.name) % 100  # 0-99 deterministic per entity
+    jitter = 0.85 + (name_hash / 100) * 0.30  # 0.85 to 1.15
+
+    return {
+        k: max(1, int(v * degree_factor * jitter))
+        for k, v in base.items()
+    }
+
+
 class OasisProfileGenerator:
     """
     OASIS Profile Generator
@@ -188,14 +236,26 @@ class OasisProfileGenerator:
     
     # Individual entity types (require generating specific personas)
     INDIVIDUAL_ENTITY_TYPES = [
-        "student", "alumni", "professor", "person", "publicfigure", 
-        "expert", "faculty", "official", "journalist", "activist"
+        "student", "alumni", "professor", "person", "publicfigure",
+        "expert", "faculty", "official", "journalist", "activist",
+        "politician", "scientist", "researcher", "athlete", "artist",
+        "musician", "author", "entrepreneur", "investor", "diplomat",
+        "celebrity", "ceo", "executive", "regulator",
     ]
-    
+
+    # Keywords in entity type names that indicate an individual
+    INDIVIDUAL_TYPE_KEYWORDS = [
+        "founder", "forecaster", "user", "trader", "influencer",
+        "analyst", "advisor", "leader", "critic", "advocate",
+        "commentator", "blogger", "developer", "engineer",
+    ]
+
     # Group/institutional entity types (require generating representative account personas)
     GROUP_ENTITY_TYPES = [
-        "university", "governmentagency", "organization", "ngo", 
-        "mediaoutlet", "company", "institution", "group", "community"
+        "university", "governmentagency", "organization", "ngo",
+        "mediaoutlet", "company", "institution", "group", "community",
+        "agency", "platform", "network", "protocol", "framework",
+        "fund", "exchange", "consortium", "coalition",
     ]
     
     def __init__(
@@ -204,7 +264,8 @@ class OasisProfileGenerator:
         base_url: Optional[str] = None,
         model_name: Optional[str] = None,
         storage: Optional[GraphStorage] = None,
-        graph_id: Optional[str] = None
+        graph_id: Optional[str] = None,
+        simulation_requirement: Optional[str] = None,
     ):
         self.model_name = model_name or Config.LLM_MODEL_NAME
         self.llm = create_llm_client(
@@ -216,6 +277,10 @@ class OasisProfileGenerator:
         # GraphStorage for hybrid search enrichment
         self.storage = storage
         self.graph_id = graph_id
+
+        # Web enrichment for notable figures / thin context
+        self.web_enricher = WebEnricher()
+        self.simulation_requirement = simulation_requirement or ""
     
     def generate_profile_from_entity(
         self, 
@@ -265,8 +330,14 @@ class OasisProfileGenerator:
         risk_tolerance = profile_data.get("risk_tolerance")
         if not risk_tolerance:
             risk_tolerance = self._infer_risk_tolerance(
-                entity_type, profile_data.get("mbti"), profile_data.get("profession")
+                entity_type, profile_data.get("mbti"), profile_data.get("profession"),
+                entity_name=name,
             )
+
+        # Derive social metrics from entity type + graph degree instead of random dice rolls.
+        # These defaults are still approximations, but they're at least grounded in the
+        # entity's structural role rather than random.randint().
+        social_defaults = _social_metrics_for_entity_type(entity_type, entity)
 
         return OasisAgentProfile(
             user_id=user_id,
@@ -275,10 +346,10 @@ class OasisProfileGenerator:
             bio=profile_data.get("bio", f"{entity_type}: {name}"),
             persona=profile_data.get("persona", entity.summary or f"A {entity_type} named {name}."),
             risk_tolerance=risk_tolerance,
-            karma=profile_data.get("karma", random.randint(500, 5000)),
-            friend_count=profile_data.get("friend_count", random.randint(50, 500)),
-            follower_count=profile_data.get("follower_count", random.randint(100, 1000)),
-            statuses_count=profile_data.get("statuses_count", random.randint(100, 2000)),
+            karma=profile_data.get("karma", social_defaults["karma"]),
+            friend_count=profile_data.get("friend_count", social_defaults["friend_count"]),
+            follower_count=profile_data.get("follower_count", social_defaults["follower_count"]),
+            statuses_count=profile_data.get("statuses_count", social_defaults["statuses_count"]),
             age=profile_data.get("age"),
             gender=profile_data.get("gender"),
             mbti=profile_data.get("mbti"),
@@ -300,15 +371,28 @@ class OasisProfileGenerator:
         return f"{username}_{suffix}"
     
     @staticmethod
-    def _infer_risk_tolerance(entity_type: str, mbti: Optional[str], profession: Optional[str]) -> str:
+    def _infer_risk_tolerance(entity_type: str, mbti: Optional[str], profession: Optional[str],
+                              entity_name: str = "") -> str:
         """Infer risk tolerance from entity characteristics for Polymarket profiles."""
+        # Check entity name for domain-specific hints
+        name_lower = (entity_name or "").lower()
+        if any(w in name_lower for w in ("hedge fund", "venture", "trading", "capital",
+                                          "defi", "prediction market", "polymarket", "augur")):
+            return "high"
+        if any(w in name_lower for w in ("stablecoin", "usdc", "usdt", "reserve", "treasury")):
+            return "low"
+
         # Institutional entities tend to be conservative
         if entity_type and entity_type.lower() in (
             "governmentagency", "ngo", "institution", "university"
         ):
             return "low"
-        # Companies and media tend to be moderate
+        # Companies and media — vary based on domain
         if entity_type and entity_type.lower() in ("company", "mediaoutlet", "organization"):
+            # Use name hash for deterministic but varied assignment
+            if entity_name:
+                h = hash(entity_name) % 3
+                return ["low", "moderate", "high"][h]
             return "moderate"
         # Derive from MBTI: perceiving types (xNxP) tend to be more risk-tolerant
         if mbti and len(mbti) == 4:
@@ -477,16 +561,46 @@ class OasisProfileGenerator:
 
         if graph_results.get("node_summaries"):
             context_parts.append("### Related Nodes Retrieved from Knowledge Graph\n" + "\n".join(f"- {s}" for s in graph_results["node_summaries"][:10]))
-        
+
+        # 5. Web enrichment — fetch real-world info for notable figures or thin context
+        existing_context = "\n\n".join(context_parts)
+        entity_type = entity.get_entity_type() or "Entity"
+        web_context = self.web_enricher.enrich_if_needed(
+            entity_name=entity.name,
+            entity_type=entity_type,
+            existing_context=existing_context,
+            simulation_requirement=self.simulation_requirement,
+        )
+        if web_context:
+            context_parts.append(web_context)
+
         return "\n\n".join(context_parts)
     
     def _is_individual_entity(self, entity_type: str) -> bool:
-        """Check if this is an individual type entity"""
-        return entity_type.lower() in self.INDIVIDUAL_ENTITY_TYPES
-    
+        """Check if this is an individual type entity.
+
+        Uses exact match on known types, then keyword matching on the type name.
+        Defaults to True for unknown types (individual is the safer assumption —
+        produces richer personas than the institutional template).
+        """
+        et = entity_type.lower().replace(" ", "")
+        # Exact match
+        if et in self.INDIVIDUAL_ENTITY_TYPES:
+            return True
+        # Keyword match (e.g., "CryptoFounder" contains "founder")
+        for keyword in self.INDIVIDUAL_TYPE_KEYWORDS:
+            if keyword in et:
+                return True
+        # If it's a known group type, it's not individual
+        if self._is_group_entity(entity_type):
+            return False
+        # Default: treat unknown types as individual (safer)
+        return True
+
     def _is_group_entity(self, entity_type: str) -> bool:
         """Check if this is a group/institutional type entity"""
-        return entity_type.lower() in self.GROUP_ENTITY_TYPES
+        et = entity_type.lower().replace(" ", "")
+        return et in self.GROUP_ENTITY_TYPES
     
     def _generate_profile_with_llm(
         self,
@@ -656,8 +770,24 @@ class OasisProfileGenerator:
     
     def _get_system_prompt(self, is_individual: bool) -> str:
         """Get system prompt"""
-        base_prompt = "You are an expert in generating social media user profiles. Generate detailed, realistic personas for opinion simulation, faithfully restoring existing real-world situations as much as possible. You must return valid JSON format, and all string values must not contain unescaped newlines. Use English."
-        return base_prompt
+        if is_individual:
+            return (
+                "You are an expert character writer creating social media personas for a "
+                "multi-agent simulation. Your personas must feel like REAL people — messy, "
+                "opinionated, contradictory, specific. Avoid generic corporate-speak or "
+                "balanced-sounding descriptions. Every person has biases, blind spots, and "
+                "strong feelings about something. Lean into those.\n\n"
+                "Return valid JSON. All string values must be plain text (no newlines, no markdown). "
+                "Use English."
+            )
+        return (
+            "You are an expert in institutional communications creating official social media "
+            "account personas for a multi-agent simulation. Institutional accounts have a distinct "
+            "voice — formal but not robotic, on-message but not tone-deaf. They hedge on "
+            "controversies, amplify achievements, and deflect criticism with practiced diplomacy.\n\n"
+            "Return valid JSON. All string values must be plain text (no newlines, no markdown). "
+            "Use English."
+        )
     
     def _build_individual_persona_prompt(
         self,
@@ -672,40 +802,35 @@ class OasisProfileGenerator:
         attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "None"
         context_str = context[:3000] if context else "No additional context"
 
-        return f"""Generate a detailed social media user persona for the entity, faithfully restoring existing real-world situations as much as possible.
+        return f"""Create a persona for this person to use in a social media simulation.
 
-Entity name: {entity_name}
-Entity type: {entity_type}
-Entity summary: {entity_summary}
-Entity attributes: {attrs_str}
+ENTITY: {entity_name} ({entity_type})
+SUMMARY: {entity_summary}
+ATTRIBUTES: {attrs_str}
 
-Context information:
+CONTEXT (from knowledge graph and research):
 {context_str}
 
-Please generate JSON with the following fields:
+Return JSON with these fields:
 
-1. bio: Social media bio, 200 words
-2. persona: Detailed persona description (2000 words of plain text), must include:
-   - Basic information (age, profession, educational background, location)
-   - Character background (important experiences, connection to events, social relationships)
-   - Personality traits (MBTI type, core personality, emotional expression style)
-   - Social media behavior (posting frequency, content preferences, interaction style, language characteristics)
-   - Stances and opinions (attitude toward topics, content that could provoke or move them)
-   - Unique traits (catchphrases, special experiences, personal hobbies)
-   - Personal memory (important part of the persona, introduce this individual's connection to events, and their existing actions and reactions in those events)
-3. age: Age as a number (must be an integer)
-4. gender: Gender, must be in English: "male" or "female"
-5. mbti: MBTI type (e.g., INTJ, ENFP, etc.)
-6. country: Country
-7. profession: Profession
-8. interested_topics: Array of interested topics
+"bio": A punchy social media bio (2-3 sentences). Not a resume — a vibe. What would this person actually write in their Twitter/Reddit bio? Include their attitude, not just their job title.
 
-Important:
-- All field values must be strings or numbers, do not use newlines
-- persona must be a coherent text description
-- Use English
-- Content must be consistent with entity information
-- age must be a valid integer, gender must be "male" or "female"
+"persona": A rich character description (800-1200 words). Write this as a character brief for an actor, not a Wikipedia entry. Cover:
+- WHO THEY ARE: Background, career, education. But focus on what shaped their worldview, not just facts.
+- HOW THEY THINK: Their reasoning style — do they argue from data, emotion, authority, personal experience? Are they charitable to opponents or combative? Do they change their mind easily or dig in?
+- WHAT THEY CARE ABOUT: Their 2-3 strongest opinions on the simulation topic. Be specific — not "supports regulation" but "believes self-regulation has failed because of X, and points to Y as evidence."
+- THEIR BLIND SPOTS: What are they wrong about, or what do they refuse to consider? Every real person has these.
+- ONLINE BEHAVIOR: How they actually post — long threads vs. one-liners, sarcastic vs. earnest, confrontational vs. diplomatic, uses data vs. anecdotes. Do they dunk on people? Do they write essays? Do they meme?
+- WHAT WOULD MAKE THEM CHANGE THEIR MIND: What evidence or argument could shift their position? Or are they unmovable on this topic?
+
+"age": Integer
+"gender": "male" or "female"
+"mbti": MBTI type (e.g., "INTJ")
+"country": Country name
+"profession": Their job title or role
+"interested_topics": ["topic1", "topic2", ...] (3-6 topics)
+
+IMPORTANT: Do NOT include karma, friend_count, follower_count, or statuses_count — those are computed separately.
 """
 
     def _build_group_persona_prompt(
@@ -721,40 +846,38 @@ Important:
         attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "None"
         context_str = context[:3000] if context else "No additional context"
 
-        return f"""Generate a detailed social media account profile for an institutional/group entity, faithfully restoring existing real-world situations as much as possible.
+        return f"""Create an official social media account persona for this organization.
 
-Entity name: {entity_name}
-Entity type: {entity_type}
-Entity summary: {entity_summary}
-Entity attributes: {attrs_str}
+ENTITY: {entity_name} ({entity_type})
+SUMMARY: {entity_summary}
+ATTRIBUTES: {attrs_str}
 
-Context information:
+CONTEXT (from knowledge graph and research):
 {context_str}
 
-Please generate JSON with the following fields:
+Return JSON with these fields:
 
-1. bio: Official account bio, 200 words, professional and appropriate
-2. persona: Detailed account profile description (2000 words of plain text), must include:
-   - Basic institutional information (official name, nature of institution, founding background, main functions)
-   - Account positioning (account type, target audience, core functions)
-   - Communication style (language characteristics, common expressions, taboo topics)
-   - Content characteristics (content types, posting frequency, active time periods)
-   - Stances and attitudes (official stance on core topics, approach to handling controversies)
-   - Special notes (represented group profile, operational habits)
-   - Institutional memory (important part of the persona, introduce this institution's connection to events, and its existing actions and reactions in those events)
-3. age: Fixed at 30 (virtual age for institutional accounts)
-4. gender: Fixed as "other" (institutional accounts use "other" to indicate non-individual)
-5. mbti: MBTI type, used to describe account style, e.g., ISTJ represents rigorous and conservative
-6. country: Country
-7. profession: Institutional function description
-8. interested_topics: Array of focus areas
+"bio": The official account bio (2-3 sentences). Professional but not boring. Think real organizational Twitter bios — they have personality within institutional constraints.
 
-Important:
-- All field values must be strings or numbers, null values are not allowed
-- persona must be a coherent text description, do not use newlines
-- Use English (gender field must be "other")
-- age must be the integer 30, gender must be the string "other"
-- Institutional account communications must align with its identity positioning"""
+"persona": A communications playbook for this account (600-900 words). This is a guide for how the account behaves online:
+- INSTITUTIONAL IDENTITY: What is this organization, and what is its public mission? What image does it project?
+- OFFICIAL POSITION: Where does this organization stand on the simulation topic? What's the official line? How do they frame it?
+- VOICE AND TONE: Formal vs. accessible? Does it use jargon or plain language? First person plural ("we believe") or third person ("the organization maintains")? Does it show personality or stay buttoned-up?
+- CONTENT STRATEGY: What does this account actually post? Press releases, data, opinion pieces, event promotion? Does it engage in debates or just broadcast?
+- CONTROVERSY HANDLING: How does it respond to criticism? Ignore, deflect, address head-on, or issue a carefully worded non-response?
+- RED LINES: What will this account never say or do? What positions would be off-brand?
+
+"age": 30
+"gender": "other"
+"mbti": MBTI type reflecting the account's communication style. VARY THIS — not all orgs are ISTJ. \
+Examples: "ISTJ" (conservative, by-the-book), "ENTJ" (assertive, agenda-setting), "ENFJ" (community-building, outreach), \
+"INTP" (technical, research-focused), "ESTP" (bold, action-oriented)
+"country": Country where headquartered
+"profession": Brief description of institutional function
+"interested_topics": ["topic1", "topic2", ...] (3-6 focus areas)
+
+IMPORTANT: Do NOT include karma, friend_count, follower_count, or statuses_count — those are computed separately.
+"""
     
     def _generate_profile_rule_based(
         self,
@@ -832,14 +955,62 @@ Important:
     def set_graph_id(self, graph_id: str):
         """Set knowledge graph ID for knowledge graph search"""
         self.graph_id = graph_id
-    
+
+    @staticmethod
+    def _interleave_by_type(entities: list) -> list:
+        """Reorder entities to interleave types for diverse early results.
+
+        Instead of [Org, Org, Org, Person, Person], produces
+        [Person, Org, Person, Org, Org] — round-robin by type.
+        """
+        from collections import defaultdict
+        buckets = defaultdict(list)
+        for e in entities:
+            etype = (e.get_entity_type() or "Entity").lower()
+            buckets[etype].append(e)
+
+        # Sort buckets so individual types come first (more interesting personas)
+        individual_keys = []
+        group_keys = []
+        for key in buckets:
+            if key in ("person", "publicfigure", "expert", "faculty", "student",
+                       "alumni", "journalist", "activist", "politician", "official",
+                       "cryptofounder", "electionforecaster", "predictionmarketuser",
+                       "cryptoinfluencer", "regulatoryofficial"):
+                individual_keys.append(key)
+            else:
+                group_keys.append(key)
+
+        ordered_keys = individual_keys + group_keys
+        # Add any keys not in either list
+        for key in buckets:
+            if key not in ordered_keys:
+                ordered_keys.append(key)
+
+        # Round-robin interleave
+        result = []
+        iterators = {k: iter(buckets[k]) for k in ordered_keys}
+        while iterators:
+            exhausted = []
+            for key in ordered_keys:
+                if key not in iterators:
+                    continue
+                try:
+                    result.append(next(iterators[key]))
+                except StopIteration:
+                    exhausted.append(key)
+            for key in exhausted:
+                del iterators[key]
+
+        return result
+
     def generate_profiles_from_entities(
         self,
         entities: List[EntityNode],
         use_llm: bool = True,
         progress_callback: Optional[callable] = None,
         graph_id: Optional[str] = None,
-        parallel_count: int = 5,
+        parallel_count: int = 15,
         realtime_output_path: Optional[str] = None,
         output_platform: str = "reddit"
     ) -> List[OasisAgentProfile]:
@@ -864,6 +1035,10 @@ Important:
         # Set graph_id for knowledge graph search
         if graph_id:
             self.graph_id = graph_id
+
+        # Interleave entity types for diverse early results
+        # (instead of all orgs first, then all people)
+        entities = self._interleave_by_type(entities)
 
         total = len(entities)
         profiles = [None] * total  # Pre-allocate list to maintain order

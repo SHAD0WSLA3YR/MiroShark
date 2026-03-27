@@ -297,7 +297,16 @@ class BaseAction(ABC):
         return await self.perform_action(user_message, "sign_up")
 
     async def do_nothing(self):
-        """Perform no action."""
+        """Skip this round and take no action. Choose this when the current
+        market state already reflects your beliefs, no new information has
+        emerged, or you want to conserve capital and wait for a better
+        opportunity. Good traders and users are patient — not every round
+        requires action. This should be your most common choice (30-50%
+        of rounds).
+
+        Returns:
+            dict: {"success": True}
+        """
         return await self.perform_action(None, "do_nothing")
 
     def get_openai_function_list(self) -> list[FunctionTool]:
@@ -323,6 +332,8 @@ class BaseEnvironment(ABC):
 
     def __init__(self, action: BaseAction):
         self.action = action
+        # Optional extra context injected before each round (e.g., social media summary)
+        self.extra_observation_context: str = ""
 
     @abstractmethod
     async def to_text_prompt(self) -> str:

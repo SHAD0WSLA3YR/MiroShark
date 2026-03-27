@@ -82,6 +82,13 @@ class Config:
         'view_portfolio', 'create_market', 'comment_on_market', 'do_nothing'
     ]
     
+    # Web Enrichment — LLM-powered research for persona generation
+    # Triggers for notable figures (politicians, CEOs, etc.) or when graph context is thin
+    WEB_ENRICHMENT_ENABLED = os.environ.get('WEB_ENRICHMENT_ENABLED', 'true').lower() == 'true'
+    # Optional: dedicated model for web research (e.g. "perplexity/sonar-pro" on OpenRouter
+    # for grounded search, or "perplexity/sonar" for fast search). If empty, uses default LLM.
+    WEB_SEARCH_MODEL = os.environ.get('WEB_SEARCH_MODEL', '')
+
     # Report Agent configuration
     REPORT_AGENT_MAX_TOOL_CALLS = int(os.environ.get('REPORT_AGENT_MAX_TOOL_CALLS', '5'))
     REPORT_AGENT_MAX_REFLECTION_ROUNDS = int(os.environ.get('REPORT_AGENT_MAX_REFLECTION_ROUNDS', '2'))

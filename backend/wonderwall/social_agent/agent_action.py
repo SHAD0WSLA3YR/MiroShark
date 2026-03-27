@@ -133,10 +133,15 @@ class SocialAction:
         return await self.perform_action(None, ActionType.REFRESH.value)
 
     async def do_nothing(self):
-        """Perform no action.
+        """Skip this round and do nothing. Choose this when nothing in your
+        feed is worth engaging with — the posts are irrelevant to you,
+        you have nothing new to add, or you just don't feel like posting.
+        Real users scroll past most content without interacting.
+        This should be your most common action (40-60% of rounds).
+
         Returns:
-            dict: A dictionary with 'success' indicating if the removal was
-                successful.
+            dict: A dictionary with 'success' indicating the action was
+                recorded.
             Example of a successful return:
                 {"success": True}
         """

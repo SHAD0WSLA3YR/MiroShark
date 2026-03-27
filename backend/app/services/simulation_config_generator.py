@@ -13,6 +13,7 @@ Uses a step-by-step generation strategy to avoid failure from generating overly 
 
 import json
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -124,21 +125,41 @@ class EventConfig:
     # Public opinion direction
     narrative_direction: str = ""
 
+    # Polymarket prediction markets (seeded at round 0)
+    initial_markets: List[Dict[str, Any]] = field(default_factory=list)
+
 
 @dataclass
 class PlatformConfig:
-    """Platform-specific configuration"""
+    """Platform-specific configuration.
+
+    NOTE ON DEFAULT VALUES: The defaults below are heuristic starting points,
+    NOT calibrated against real platform data. They exist because the OASIS
+    simulation framework requires these parameters. Users should treat them as
+    tunable scenario assumptions, not empirical constants.
+
+    - viral_threshold: In a simulation of ~50-200 agents, 10-15 interactions is
+      roughly the top 5-10% of posts. Real Twitter virality thresholds are
+      orders of magnitude higher, but our agent population is proportionally smaller.
+    - echo_chamber_strength: 0.0 = no clustering, 1.0 = fully siloed. The defaults
+      (0.5 Twitter, 0.6 Reddit) reflect the assumption that Reddit's subreddit
+      structure creates slightly stronger echo chambers than Twitter's timeline.
+    - Recommendation weights: These control the feed algorithm's trade-off between
+      fresh content, popular content, and content relevant to the agent's interests.
+    """
     platform: str  # twitter or reddit
 
-    # Recommendation algorithm weights
-    recency_weight: float = 0.4  # Time freshness
-    popularity_weight: float = 0.3  # Popularity
-    relevance_weight: float = 0.3  # Relevance
+    # Recommendation algorithm weights (must sum to 1.0)
+    recency_weight: float = 0.4   # Favor recent content
+    popularity_weight: float = 0.3  # Favor high-engagement content
+    relevance_weight: float = 0.3   # Favor content matching agent interests
 
-    # Viral threshold (number of interactions before triggering spread)
+    # Viral threshold: number of interactions before a post gets amplified.
+    # Heuristic for small populations (~50-200 agents). Not calibrated against real data.
     viral_threshold: int = 10
 
-    # Echo chamber effect strength (degree of similar viewpoint clustering)
+    # Echo chamber strength: 0.0 (no clustering) to 1.0 (fully siloed).
+    # Heuristic assumption, not empirically derived.
     echo_chamber_strength: float = 0.5
 
 
@@ -300,25 +321,45 @@ class SimulationConfigGenerator:
         event_config = self._parse_event_config(event_config_result)
         reasoning_parts.append(f"Event config: {event_config_result.get('reasoning', 'success')}")
 
-        # ========== Steps 3-N: Batch generate Agent configurations ==========
+        # ========== Step 2b: Generate prediction markets ==========
+        report_progress(3, "Generating prediction markets...")
+        markets = self._generate_prediction_markets(context, simulation_requirement, event_config)
+        event_config.initial_markets = markets
+        reasoning_parts.append(f"Prediction markets: {len(markets)} markets generated")
+
+        # ========== Steps 3-N: Batch generate Agent configurations (parallel) ==========
         all_agent_configs = []
-        for batch_idx in range(num_batches):
+        # Cap concurrency to avoid rate limits — 3 parallel LLM calls
+        max_parallel_batches = min(3, num_batches)
+
+        def _gen_batch(batch_idx):
             start_idx = batch_idx * self.AGENTS_PER_BATCH
             end_idx = min(start_idx + self.AGENTS_PER_BATCH, len(entities))
             batch_entities = entities[start_idx:end_idx]
-
-            report_progress(
-                3 + batch_idx,
-                f"Generating Agent configs ({start_idx + 1}-{end_idx}/{len(entities)})..."
-            )
-
-            batch_configs = self._generate_agent_configs_batch(
+            return batch_idx, self._generate_agent_configs_batch(
                 context=context,
                 entities=batch_entities,
                 start_idx=start_idx,
-                simulation_requirement=simulation_requirement
+                simulation_requirement=simulation_requirement,
             )
-            all_agent_configs.extend(batch_configs)
+
+        report_progress(3, f"Generating Agent configs ({num_batches} batches, {max_parallel_batches} parallel)...")
+
+        with ThreadPoolExecutor(max_workers=max_parallel_batches) as pool:
+            futures = {pool.submit(_gen_batch, bi): bi for bi in range(num_batches)}
+            # Collect results in order
+            results_by_idx = {}
+            for future in as_completed(futures):
+                batch_idx, batch_configs = future.result()
+                results_by_idx[batch_idx] = batch_configs
+                done_count = len(results_by_idx)
+                report_progress(
+                    3 + done_count - 1,
+                    f"Agent config batch {done_count}/{num_batches} done"
+                )
+
+        for batch_idx in range(num_batches):
+            all_agent_configs.extend(results_by_idx[batch_idx])
 
         reasoning_parts.append(f"Agent configs: Successfully generated {len(all_agent_configs)}")
 
@@ -334,23 +375,27 @@ class SimulationConfigGenerator:
         reddit_config = None
 
         if enable_twitter:
+            # Twitter: slightly favors recency, moderate echo chamber.
+            # See PlatformConfig docstring for rationale behind these defaults.
             twitter_config = PlatformConfig(
                 platform="twitter",
                 recency_weight=0.4,
                 popularity_weight=0.3,
                 relevance_weight=0.3,
                 viral_threshold=10,
-                echo_chamber_strength=0.5
+                echo_chamber_strength=0.5,
             )
 
         if enable_reddit:
+            # Reddit: favors popularity (upvotes), slightly stronger echo chamber
+            # (subreddit-like clustering effect).
             reddit_config = PlatformConfig(
                 platform="reddit",
                 recency_weight=0.3,
                 popularity_weight=0.4,
                 relevance_weight=0.3,
                 viral_threshold=15,
-                echo_chamber_strength=0.6
+                echo_chamber_strength=0.6,
             )
 
         # Build final parameters
@@ -571,7 +616,16 @@ Field descriptions:
 - work_hours (int array): Work hours
 - reasoning (string): Brief explanation of why this configuration was chosen"""
 
-        system_prompt = "You are a social media simulation expert. Return pure JSON format; time configuration must follow a typical daily activity schedule."
+        system_prompt = (
+            "You are a social media simulation architect. Return pure JSON.\n\n"
+            "TIMING HEURISTICS:\n"
+            "- Breaking news / crisis: short rounds (15-30 min), 24-48 hours total, high activity\n"
+            "- Product launch / announcement: medium rounds (30-60 min), 48-72 hours, front-loaded activity\n"
+            "- Policy debate / slow-burn issue: long rounds (60-120 min), 72-168 hours, steady activity\n"
+            "- Peak hours: 8-10 AM and 6-9 PM local time. Quiet: 12-6 AM.\n"
+            "- More agents = lower per-agent activity (they can't all post every round).\n"
+            "- The simulation should feel like real-time social media — bursts of activity, not constant noise."
+        )
 
         try:
             return self._call_llm_with_retry(prompt, system_prompt)
@@ -687,7 +741,17 @@ Return JSON format (no markdown):
     "reasoning": "<brief explanation>"
 }}"""
 
-        system_prompt = "You are a public opinion analysis expert. Return pure JSON format. Note that poster_type must exactly match available entity types."
+        system_prompt = (
+            "You are a public opinion simulation designer. Return pure JSON.\n\n"
+            "EVENT DESIGN HEURISTICS:\n"
+            "- Initial posts should feel organic, not like press releases. Real people break news casually.\n"
+            "- The first poster should be whoever would realistically learn about this first "
+            "(journalist, insider, affected person — not an institution).\n"
+            "- Schedule 2-3 'plot twists' — new information that changes the dynamic mid-simulation.\n"
+            "- Hot topics should emerge from the scenario, not be forced. Think: what would trend?\n"
+            "- poster_type must exactly match available entity types.\n"
+            "- Narrative direction should have tension — not everyone agrees, and that's the point."
+        )
 
         try:
             return self._call_llm_with_retry(prompt, system_prompt)
@@ -794,6 +858,93 @@ Return JSON format (no markdown):
         event_config.initial_posts = updated_posts
         return event_config
 
+    def _generate_prediction_markets(
+        self,
+        context: str,
+        simulation_requirement: str,
+        event_config: EventConfig,
+    ) -> List[Dict[str, Any]]:
+        """Generate prediction markets from the simulation requirement.
+
+        Creates 3-5 well-formed YES/NO questions that agents can trade on.
+        Each market has an initial probability estimate that sets the starting price.
+        """
+        hot_topics = event_config.hot_topics[:5] if event_config.hot_topics else []
+
+        system_prompt = (
+            "You are a prediction market designer. Return pure JSON.\n\n"
+            "RULES:\n"
+            "- Create exactly ONE prediction market as a YES/NO question\n"
+            "- The question must be the SINGLE BEST market that captures the "
+            "core tension of the simulation scenario\n"
+            "- It must be SPECIFIC, TIME-BOUND, and RESOLVABLE "
+            "(e.g., 'Will X happen by Y date?' not 'Is X good?')\n"
+            "- The question should be something the simulated agents would "
+            "genuinely DISAGREE about — not a foregone conclusion\n"
+            "- Set initial_probability to your best estimate (0.15-0.85). "
+            "This becomes the starting YES price. Avoid 0.50 — have an opinion.\n"
+        )
+
+        user_prompt = f"""Simulation: {simulation_requirement}
+
+Hot topics: {', '.join(hot_topics) if hot_topics else 'N/A'}
+
+Context:
+{context[:2000]}
+
+Generate ONE prediction market that best captures the central question of this simulation:
+{{
+  "markets": [
+    {{
+      "question": "Will X happen by Y?",
+      "outcome_a": "YES",
+      "outcome_b": "NO",
+      "initial_probability": 0.65,
+      "reasoning": "Why this is THE right question and why you set this probability"
+    }}
+  ]
+}}"""
+
+        try:
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            result = self.llm.chat_json(messages=messages, temperature=0.5)
+
+            markets_raw = result.get("markets", [])
+            markets = []
+            for m in markets_raw[:1]:  # exactly one market
+                question = m.get("question", "")
+                if not question:
+                    continue
+                prob = m.get("initial_probability", 0.5)
+                # Clamp probability to valid range
+                prob = max(0.10, min(0.90, float(prob)))
+                markets.append({
+                    "question": question,
+                    "outcome_a": m.get("outcome_a", "YES"),
+                    "outcome_b": m.get("outcome_b", "NO"),
+                    "initial_probability": prob,
+                    "reasoning": m.get("reasoning", ""),
+                })
+
+            logger.info(f"Generated {len(markets)} prediction markets")
+            for mkt in markets:
+                logger.info(f"  Market: \"{mkt['question']}\" (initial: {mkt['initial_probability']:.0%})")
+            return markets
+
+        except Exception as e:
+            logger.warning(f"Prediction market generation failed: {e}")
+            # Fallback: derive a market from the simulation requirement
+            return [{
+                "question": f"Will the scenario described have a net positive public reaction?",
+                "outcome_a": "YES",
+                "outcome_b": "NO",
+                "initial_probability": 0.55,
+                "reasoning": "Fallback — auto-generated from simulation requirement",
+            }]
+
     def _generate_agent_configs_batch(
         self,
         context: str,
@@ -850,7 +1001,20 @@ Return JSON format (no markdown):
     ]
 }}"""
 
-        system_prompt = "You are a social media behavior analysis expert. Return pure JSON; configuration must follow a typical daily activity schedule."
+        system_prompt = (
+            "You are a social media behavior analyst. Return pure JSON.\n\n"
+            "AGENT BEHAVIOR HEURISTICS:\n"
+            "- Institutions post rarely (0.5-1/hr) but with high influence. They don't shitpost.\n"
+            "- Journalists post frequently (2-4/hr) during business hours, mostly sharing/commenting.\n"
+            "- Activists post heavily (3-5/hr) at all hours with strong sentiment bias.\n"
+            "- Regular people post occasionally (0.3-1/hr) and mostly like/comment rather than post.\n"
+            "- Experts post moderately (1-2/hr) with neutral tone but high influence.\n"
+            "- stance should reflect the entity's actual position from the document, not random assignment.\n"
+            "- sentiment_bias and stance must be CONSISTENT: a supportive entity should have positive bias.\n"
+            "- influence_weight: 2.0-3.0 for institutions/media, 1.0-2.0 for experts, 0.5-1.0 for individuals.\n"
+            "- active_hours should reflect the entity's timezone and role (journalists: business hours, "
+            "activists: evenings, institutions: 9-5)."
+        )
 
         try:
             result = self._call_llm_with_retry(prompt, system_prompt)

@@ -36,8 +36,7 @@ polymarket_simulation = SimulationConfig(
     environment_cls=PolymarketEnvironment,
     prompt_builder=PolymarketPromptBuilder(),
     default_actions=[
-        "browse_markets", "buy_shares", "sell_shares",
-        "view_portfolio", "create_market", "comment_on_market",
+        "buy_shares", "sell_shares",
         "do_nothing",
     ],
     platform_kwargs={

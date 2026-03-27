@@ -83,15 +83,30 @@ class PolymarketPlatform(BasePlatform):
 
     async def create_market(self, agent_id, market_message):
         """Create a new prediction market."""
-        question, outcome_a, outcome_b = market_message
+        # Support optional initial_probability as 4th element
+        if len(market_message) >= 4:
+            question, outcome_a, outcome_b, initial_prob = market_message
+            initial_prob = max(0.05, min(0.95, float(initial_prob)))
+        else:
+            question, outcome_a, outcome_b = market_message
+            initial_prob = 0.5
+
         current_time = self.get_current_time()
         try:
             liq = self.initial_liquidity
+            # Set reserves so price_YES = initial_prob
+            # price_YES = reserve_b / (reserve_a + reserve_b)
+            # With constant product k = reserve_a * reserve_b = liq^2
+            import math
+            k = liq * liq
+            reserve_b = math.sqrt(k * initial_prob / (1 - initial_prob))
+            reserve_a = k / reserve_b
+
             self._execute_db_command(
                 "INSERT INTO market (creator_id, question, outcome_a, "
                 "outcome_b, reserve_a, reserve_b, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (agent_id, question, outcome_a, outcome_b, liq, liq,
+                (agent_id, question, outcome_a, outcome_b, reserve_a, reserve_b,
                  current_time),
                 commit=True,
             )

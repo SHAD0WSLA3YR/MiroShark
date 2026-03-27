@@ -546,122 +546,240 @@ Workflow:
 
 [Important] The OASIS simulation environment must be running to use this feature!"""
 
+TOOL_DESC_ANALYZE_TRAJECTORY = """\
+[Belief Trajectory Analysis - Opinion Dynamics Data]
+Analyzes the trajectory.json file produced by the simulation's belief tracking system.
+Shows how agent opinions evolved across rounds — convergence, polarization, and turning points.
+
+[Use Cases]
+- Understand HOW opinions shifted over time (not just the final state)
+- Identify TURNING POINTS where significant belief shifts occurred
+- Measure CONVERGENCE vs POLARIZATION on key topics
+- Find agents whose beliefs changed most dramatically (potential persona contradictions)
+
+[Return Content]
+- Per-topic belief trajectories (mean, min, max, spread per round)
+- Opinion convergence scores (positive = convergence, negative = polarization)
+- Turning points: specific rounds/agents where significant shifts occurred
+- Topic list used for belief tracking"""
+
+TOOL_DESC_GRAPH_STRUCTURE = """\
+[Graph Structure Analysis - Centrality, Communities, Bridges]
+Analyzes the topology of the knowledge graph to reveal structural patterns:
+
+1. **Degree Centrality**: Which entities are most connected? Who are the hubs?
+2. **Community Detection**: What clusters exist? Are there information silos?
+3. **Bridge Entities**: Which entities connect otherwise separate groups?
+
+[Use Cases]
+- Understand which entities are structurally important (not just frequently mentioned)
+- Identify factions or clusters in the narrative
+- Find gatekeepers who control information flow between groups
+
+[Return Content]
+- Ranked list of most connected entities with connection counts
+- Detected communities with member lists and types
+- Bridge entities that connect disparate clusters"""
+
+TOOL_DESC_FIND_PATH = """\
+[Causal Path Finder - Trace Influence Chains]
+Finds the shortest relationship path between two named entities in the knowledge graph.
+Each step is annotated with the edge fact, revealing how influence or causality flows.
+
+[Use Cases]
+- Trace how Entity A influences Entity B through intermediaries
+- Understand the causal chain between an event and an outcome
+- Discover unexpected connections between seemingly unrelated entities
+
+[Parameters]
+- source: Name (or partial name) of the starting entity
+- target: Name (or partial name) of the target entity
+
+[Return Content]
+- Step-by-step path with relationship types and facts at each step"""
+
+TOOL_DESC_CONTRADICTIONS = """\
+[Contradiction Detector - Find Conflicting Information]
+Scans the knowledge graph for entity pairs connected by edges with opposing sentiments.
+Contradictions reveal tension points, evolving relationships, or conflicting narratives.
+
+[Use Cases]
+- Find entities with contradictory relationships (e.g., both "supports" and "opposes")
+- Identify where the narrative is internally inconsistent
+- Discover evolving stances that changed over time
+
+[Return Content]
+- Pairs of entities with contradicting edge facts
+- Sentiment labels (POSITIVE/NEGATIVE) for each edge
+- Interpretation guidance"""
+
+TOOL_DESC_SIMULATION_FEED = """\
+[Simulation Feed - MOST IMPORTANT TOOL - Read Actual Simulation Output]
+Reads the actual posts, comments, and trades that agents produced during the simulation.
+THIS IS YOUR PRIMARY DATA SOURCE. The simulation feed contains what agents actually said
+and did on Twitter, Reddit, and Polymarket. Use this BEFORE graph search tools.
+
+[Parameters]
+- platform: "twitter", "reddit", "polymarket", or "all" (default "all")
+- query: Optional keyword filter (e.g., "regulation", "CFTC")
+- round_num: Optional round number filter (e.g., 3 for round 3 only)
+
+[Return Content]
+- Actual posts and comments agents wrote (with agent names)
+- Polymarket trades (who bought/sold what, at what price)
+- Market price movements
+- Action type breakdown per platform
+
+[Use Cases]
+- Quote what specific agents said on Twitter/Reddit
+- Analyze how market prices moved and who drove the movement
+- Find the most viral/liked posts
+- Compare what agents said on social media vs how they traded
+- Track how discourse evolved across rounds"""
+
+TOOL_DESC_MARKET_STATE = """\
+[Market State - Polymarket Final State]
+Returns the current state of all prediction markets: prices, trade history,
+and trader portfolios with P&L.
+
+[Return Content]
+- Market questions with current YES/NO prices
+- Complete trade history (who bought/sold, prices, amounts)
+- Trader portfolios with cash, positions, and profit/loss
+- Price movement from initial to final"""
+
 # ── Outline Planning Prompt ──
 
 PLAN_SYSTEM_PROMPT = """\
-You are an expert in writing "Future Prediction Reports," with a "God's eye view" of the simulation world -- you can observe every Agent's behavior, speech, and interactions in the simulation.
+You are an expert analyst writing a "Scenario Exploration Report" with a "God's eye view" of a multi-agent simulation. You can observe every Agent's behavior, speech, belief changes, and interactions.
 
 [Core Concept]
-We have built a simulation world and injected specific "simulation requirements" as variables. The evolution results of the simulation world represent predictions of what might happen in the future. What you are observing is not "experimental data," but a "rehearsal of the future."
+We built a simulation world, injected a specific scenario, and let hundreds of AI agents with unique personas react and interact. The result is NOT a prediction — it is a structured exploration of how diverse actors MIGHT respond under the given assumptions.
 
-[Your Task]
-Write a "Future Prediction Report" that answers:
-1. Under the conditions we set, what happened in the future?
-2. How did various Agents (groups of people) react and act?
-3. What noteworthy future trends and risks does this simulation reveal?
+[Important Epistemic Disclaimer]
+This simulation is powered by LLM-driven agents whose behavior reflects the language model's understanding of human personas, NOT empirically calibrated behavioral models. The value is in revealing plausible dynamics, pressure points, and non-obvious interactions — not in forecasting specific outcomes. Treat findings as "under these assumptions, this is what could happen" rather than "this is what will happen."
+
+[Your Task — ANALYTICAL, Not Descriptive]
+Design a report that answers these questions through ANALYSIS, not mere description:
+
+1. **What was SURPRISING?** What outcomes defied naive expectations? Where did the simulation reveal non-obvious dynamics?
+2. **What CAUSAL CHAINS emerged?** Trace specific chains: Event → Agent reaction → Consequence → Second-order effect
+3. **Where did agents CONTRADICT their initial personas?** What does this reveal about the scenario's pressure points?
+4. **What MINORITY positions gained unexpected traction?** Why did some fringe views find support?
+5. **What would CHANGE if key actors behaved differently?** Identify the pivotal agents/events that shaped outcomes.
+6. **What SECOND-ORDER effects emerged** that wouldn't be obvious from individual posts?
 
 [Report Positioning]
-- This is a simulation-based future prediction report, revealing "if this happens, what will the future look like"
-- Focus on prediction results: event trajectories, group reactions, emergent phenomena, potential risks
-- Agent behavior and speech in the simulation world are predictions of future human behavior
-- This is NOT an analysis of the current real-world situation
-- This is NOT a generic public opinion summary
+- This is ANALYTICAL prediction, not descriptive summary
+- Every section must contain at least one non-obvious insight
+- Quote specific agent behavior as EVIDENCE for analytical claims
+- Identify mechanisms and causality, not just outcomes
+- If the simulation reveals something boring or expected, say so — then dig deeper
 
 [Section Count Limits]
-- Minimum 2 sections, maximum 5 sections
+- Minimum 3 sections, maximum 5 sections
+- The LAST section should always be "Synthesis & Implications" — cross-cutting patterns, unresolved tensions, and what the simulation CANNOT answer
 - No sub-sections needed, each section should contain complete content directly
-- Content should be concise, focusing on core prediction findings
-- Section structure should be designed by you based on prediction results
+- Section structure should be designed by you based on what's analytically interesting
 
 Please output the report outline in JSON format as follows:
 {
     "title": "Report title",
-    "summary": "Report summary (one sentence summarizing core prediction findings)",
+    "summary": "Report summary (one sentence — the single most important non-obvious finding)",
     "sections": [
         {
             "title": "Section title",
-            "description": "Section content description"
+            "description": "Section content description — what analytical question does this section answer?"
         }
     ]
 }
 
-Note: The sections array must have at least 2 and at most 5 elements!"""
+Note: The sections array must have at least 3 and at most 5 elements! The last section MUST be a synthesis section."""
 
 PLAN_USER_PROMPT_TEMPLATE = """\
-[Prediction Scenario Setup]
-Variable injected into the simulation world (simulation requirement): {simulation_requirement}
+[Scenario Setup]
+Scenario injected into the simulation: {simulation_requirement}
 
-[Simulation World Scale]
-- Number of entities participating in simulation: {total_nodes}
-- Number of relationships generated between entities: {total_edges}
+[Simulation Scale]
+- Number of entities participating: {total_nodes}
+- Number of relationships between entities: {total_edges}
 - Entity type distribution: {entity_types}
 - Number of active Agents: {total_entities}
 
-[Sample Future Facts Predicted by Simulation]
+[Sample Facts from Simulation]
 {related_facts_json}
 
-Please review this future rehearsal from a "God's eye view":
-1. Under the conditions we set, what state does the future present?
-2. How do various groups (Agents) react and act?
-3. What noteworthy future trends does this simulation reveal?
+Analyze this simulation from a "God's eye view":
+1. What dynamics emerged that would NOT be obvious from reading the source document alone?
+2. Where did agent behavior surprise you — contradicting their persona or initial stance?
+3. What causal chains or feedback loops appeared?
+4. What tensions or unresolved conflicts surfaced?
 
-Based on prediction results, design the most suitable report section structure.
+Design the report section structure around the most analytically interesting findings.
 
-[Reminder] Report section count: minimum 2, maximum 5, content should be concise and focused on core prediction findings."""
+[Reminder] Section count: minimum 3, maximum 5. Last section MUST be synthesis. Focus on non-obvious insights, not description."""
 
 # ── Section Generation Prompt ──
 
 SECTION_SYSTEM_PROMPT_TEMPLATE = """\
-You are an expert in writing "Future Prediction Reports," currently writing a section of the report.
+You are an expert analyst writing a section of a "Scenario Exploration Report" based on multi-agent simulation results.
 
 Report title: {report_title}
 Report summary: {report_summary}
-Prediction scenario (simulation requirement): {simulation_requirement}
+Scenario under exploration: {simulation_requirement}
 
 Current section to write: {section_title}
 
 ═══════════════════════════════════════════════════════════════
-[Core Concept]
+[Core Concept — ANALYTICAL Writing]
 ═══════════════════════════════════════════════════════════════
 
-The simulation world is a rehearsal of the future. We injected specific conditions (simulation requirements) into the simulation world.
-The behavior and interactions of Agents in the simulation are predictions of future human behavior.
+The simulation is a structured exploration — NOT a forecast. LLM-driven agents with diverse personas reacted to the scenario. Their behavior represents plausible responses given their assigned characteristics, not empirical predictions.
 
-Your task is to:
-- Reveal what happened in the future under the set conditions
-- Predict how various groups (Agents) reacted and acted
-- Discover noteworthy future trends, risks, and opportunities
+Your task is to ANALYZE, not describe:
+- For every claim, provide: EVIDENCE (specific agent behavior) → MECHANISM (why it happened) → IMPLICATION (what it suggests)
+- Identify at least one finding that CONTRADICTS naive expectations
+- Trace CAUSAL CHAINS: "Agent X did Y, which caused Agent Z to react with W, leading to outcome Q"
+- Flag where agent behavior CONTRADICTS their stated persona — this reveals the scenario's pressure points
+- If you find only expected results, dig deeper — look for minority views that gained traction, unexpected alliances, or second-order effects
+- Use hedged language: "the simulation suggests..." / "under these assumptions..." — NOT "this will happen"
 
-Do NOT write this as an analysis of the current real-world situation
-DO focus on "what will the future look like" -- simulation results ARE the predicted future
+Do NOT just describe what happened — explain WHY it happened and what it SUGGESTS
+Do NOT write a generic summary — every paragraph should contain an analytical insight
+Do NOT overclaim — this is scenario exploration, not prophecy
 
 ═══════════════════════════════════════════════════════════════
 [Most Important Rules - Must Follow]
 ═══════════════════════════════════════════════════════════════
 
-1. [Must Call Tools to Observe the Simulation World]
-   - You are observing the future rehearsal from a "God's eye view"
-   - All content must come from events and Agent behavior in the simulation world
-   - Do not use your own knowledge to write report content
-   - Each section must call tools at least 3 times (max 5) to observe the simulated world, which represents the future
+1. [Must Call Tools to Investigate the Simulation World]
+   - You are analyzing the simulation from a "God's eye view"
+   - All claims must be grounded in Agent behavior from the simulation
+   - Each section must call tools at least 3 times (max 6) to gather evidence
+   - **START with simulation_feed** — this is your PRIMARY data source. It contains
+     the actual posts, comments, and trades that agents produced. Read it first,
+     then use other tools to dig deeper.
+   - Use market_state to get Polymarket price movements, trade history, and P&L
+   - Use insight_forge for background context from the knowledge graph
+   - Use analyze_trajectory for belief evolution data
+   - QUOTE actual agent posts/comments — the report should cite what agents SAID
 
-2. [Must Quote Agents' Original Behavior and Speech]
-   - Agent speech and behavior are predictions of future human behavior
-   - Use quote format in the report to display these predictions, for example:
-     > "A certain group would say: original content..."
-   - These quotes are core evidence of simulation predictions
+2. [Must Support Claims with Specific Evidence]
+   - Every analytical claim needs a quote or data point as evidence:
+     > "Agent X (a conservative economist) unexpectedly supported the regulation, saying: '...'"
+   - Quote agent speech to show SURPRISES and CONTRADICTIONS, not just to illustrate expected behavior
+   - Flag when an agent's actions contradict their persona — this is analytically valuable
 
 3. [Language Consistency - Report Must Be Written in English]
    - All report content must be written in English
    - Content returned by tools may contain mixed-language expressions
-   - When quoting content returned by tools, translate it into fluent English before writing it into the report
-   - Maintain the original meaning during translation, ensuring natural and smooth expression
+   - When quoting content returned by tools, translate it into fluent English
    - This rule applies to both body text and quoted blocks (> format) content
 
-4. [Faithfully Present Prediction Results]
-   - Report content must reflect simulation results representing the future
-   - Do not add information that does not exist in the simulation
-   - If information is insufficient in some area, state this honestly
+4. [Analytical Integrity]
+   - Report content must reflect simulation results — do not fabricate
+   - If the simulation produced boring/expected results, say so honestly — then identify what subtle dynamics might explain the lack of surprise
+   - If information is insufficient, state what WOULD need to be true to make a stronger claim
 
 ═══════════════════════════════════════════════════════════════
 [Format Specifications - Extremely Important!]
@@ -800,8 +918,14 @@ Observation (retrieval result):
 
 ═══════════════════════════════════════════════════════════════
 Tools called {tool_calls_count}/{max_tool_calls} times (used: {used_tools_str}){unused_hint}
-- If information is sufficient: output section content starting with "Final Answer:" (must quote the above original text)
-- If more information is needed: call a tool to continue retrieval
+
+Before deciding your next step, ask yourself:
+- Did this result reveal anything SURPRISING or NON-OBVIOUS?
+- Can I now trace a CAUSAL CHAIN (cause → reaction → consequence)?
+- Have I found evidence that CONTRADICTS expectations?
+
+If yes → you may have enough for a strong analytical section. Output "Final Answer:"
+If no → search for contradictions, minority views, or second-order effects with another tool.
 ═══════════════════════════════════════════════════════════════"""
 
 REACT_INSUFFICIENT_TOOLS_MSG = (
@@ -826,10 +950,10 @@ REACT_FORCE_FINAL_MSG = "Tool call limit reached, please directly output Final A
 # ── Chat Prompt ──
 
 CHAT_SYSTEM_PROMPT_TEMPLATE = """\
-You are a concise and efficient simulation prediction assistant.
+You are a concise and efficient simulation analysis assistant.
 
 [Background]
-Prediction conditions: {simulation_requirement}
+Scenario explored: {simulation_requirement}
 
 [Generated Analysis Report]
 {report_content}
@@ -872,7 +996,7 @@ class ReportAgent:
     """
 
     # Maximum tool calls per section
-    MAX_TOOL_CALLS_PER_SECTION = 5
+    MAX_TOOL_CALLS_PER_SECTION = 6
 
     # Maximum reflection rounds
     MAX_REFLECTION_ROUNDS = 3
@@ -954,6 +1078,47 @@ class ReportAgent:
                     "interview_topic": "Interview topic or requirement description (e.g., 'understand students' views on the dormitory formaldehyde incident')",
                     "max_agents": "Maximum number of Agents to interview (optional, default 5, max 10)"
                 }
+            },
+            "analyze_trajectory": {
+                "name": "analyze_trajectory",
+                "description": TOOL_DESC_ANALYZE_TRAJECTORY,
+                "parameters": {
+                    "focus": "Optional focus area: 'convergence', 'turning_points', 'polarization', or 'all' (default 'all')"
+                }
+            },
+            "analyze_graph_structure": {
+                "name": "analyze_graph_structure",
+                "description": TOOL_DESC_GRAPH_STRUCTURE,
+                "parameters": {
+                    "query": "Optional focus query (e.g., 'media entities' or 'government response')"
+                }
+            },
+            "find_causal_path": {
+                "name": "find_causal_path",
+                "description": TOOL_DESC_FIND_PATH,
+                "parameters": {
+                    "source": "Name of the starting entity (or partial match)",
+                    "target": "Name of the target entity (or partial match)"
+                }
+            },
+            "detect_contradictions": {
+                "name": "detect_contradictions",
+                "description": TOOL_DESC_CONTRADICTIONS,
+                "parameters": {}
+            },
+            "simulation_feed": {
+                "name": "simulation_feed",
+                "description": TOOL_DESC_SIMULATION_FEED,
+                "parameters": {
+                    "platform": "Platform to read: 'twitter', 'reddit', 'polymarket', or 'all' (default 'all')",
+                    "query": "Optional keyword filter for post content",
+                    "round_num": "Optional round number filter"
+                }
+            },
+            "market_state": {
+                "name": "market_state",
+                "description": TOOL_DESC_MARKET_STATE,
+                "parameters": {}
             }
         }
     
@@ -1024,6 +1189,43 @@ class ReportAgent:
                 )
                 return result.to_text()
             
+            elif tool_name == "analyze_trajectory":
+                # Belief trajectory analysis — reads trajectory.json from simulation
+                focus = parameters.get("focus", "all")
+                return self._execute_trajectory_analysis(focus)
+
+            elif tool_name == "analyze_graph_structure":
+                # Graph structure analysis — centrality, communities, bridges
+                query = parameters.get("query", "")
+                return self.graph_tools.analyze_graph_structure(
+                    graph_id=self.graph_id,
+                    query=query
+                )
+
+            elif tool_name == "find_causal_path":
+                # Causal path between two entities
+                source = parameters.get("source", "")
+                target = parameters.get("target", "")
+                if not source or not target:
+                    return "Error: both 'source' and 'target' parameters are required."
+                return self.graph_tools.find_causal_path(
+                    graph_id=self.graph_id,
+                    source=source,
+                    target=target
+                )
+
+            elif tool_name == "detect_contradictions":
+                # Find contradicting edges in the graph
+                return self.graph_tools.detect_contradictions(
+                    graph_id=self.graph_id
+                )
+
+            elif tool_name == "simulation_feed":
+                return self._execute_simulation_feed(parameters)
+
+            elif tool_name == "market_state":
+                return self._execute_market_state()
+
             # ========== Backward compatible legacy tools (internally redirected to new tools) ==========
             
             elif tool_name == "search_graph":
@@ -1066,7 +1268,273 @@ class ReportAgent:
             return f"Tool execution failed: {str(e)}"
     
     # Valid tool name set, used for validation during bare JSON fallback parsing
-    VALID_TOOL_NAMES = {"insight_forge", "panorama_search", "quick_search", "interview_agents"}
+    VALID_TOOL_NAMES = {
+        "insight_forge", "panorama_search", "quick_search", "interview_agents",
+        "analyze_trajectory", "analyze_graph_structure", "find_causal_path", "detect_contradictions",
+        "simulation_feed", "market_state",
+    }
+
+    def _execute_trajectory_analysis(self, focus: str = "all") -> str:
+        """Execute the analyze_trajectory tool — reads trajectory.json from the simulation directory."""
+        sim_dir = self._get_simulation_dir()
+        trajectory_path = os.path.join(sim_dir, "trajectory.json")
+
+        if not os.path.exists(trajectory_path):
+            return (
+                "No belief trajectory data available. The simulation may not have "
+                "used the belief tracking system. This tool requires the simulation "
+                "to have been run with belief tracking enabled (trajectory.json)."
+            )
+
+        try:
+            with open(trajectory_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception as e:
+            return f"Failed to read trajectory data: {str(e)}"
+
+        lines = []
+        lines.append(f"=== Belief Trajectory Analysis ===")
+        lines.append(f"Topics tracked: {', '.join(data.get('topics', []))}")
+        lines.append(f"Total rounds: {data.get('total_rounds', 0)}")
+        lines.append("")
+
+        # Convergence analysis
+        if focus in ("all", "convergence", "polarization"):
+            convergence = data.get("opinion_convergence", {})
+            if convergence:
+                lines.append("**Opinion Convergence/Polarization:**")
+                for topic, score in convergence.items():
+                    if score > 0.1:
+                        lines.append(f"  - {topic}: CONVERGED by {score:.2f} — agents moved toward agreement")
+                    elif score < -0.1:
+                        lines.append(f"  - {topic}: POLARIZED by {abs(score):.2f} — agents became MORE divided")
+                    else:
+                        lines.append(f"  - {topic}: Stable — no significant shift ({score:.2f})")
+                lines.append("")
+
+        # Trajectories
+        if focus in ("all", "convergence"):
+            trajectories = data.get("belief_trajectories", {})
+            for topic, rounds in trajectories.items():
+                if rounds:
+                    first = rounds[0]
+                    last = rounds[-1]
+                    lines.append(f"**{topic} trajectory:**")
+                    lines.append(f"  Round {first['round']}: mean={first['mean']:.2f}, spread={first['spread']:.2f}")
+                    lines.append(f"  Round {last['round']}: mean={last['mean']:.2f}, spread={last['spread']:.2f}")
+                    # Find the round with maximum spread (most polarized)
+                    max_spread_round = max(rounds, key=lambda r: r['spread'])
+                    if max_spread_round['round'] != first['round'] and max_spread_round['round'] != last['round']:
+                        lines.append(
+                            f"  Peak polarization at round {max_spread_round['round']}: "
+                            f"spread={max_spread_round['spread']:.2f}"
+                        )
+                    lines.append("")
+
+        # Turning points
+        if focus in ("all", "turning_points"):
+            turning_points = data.get("turning_points", [])
+            if turning_points:
+                lines.append(f"**Significant Belief Shifts ({len(turning_points)} detected):**")
+                for tp in turning_points[:10]:
+                    lines.append(
+                        f"  - Round {tp['round']}, Agent {tp['agent_id']}: "
+                        f"{tp['topic']} shifted {tp['direction']} (delta: {tp['delta']:.3f})"
+                    )
+                lines.append("")
+
+                # Summarize which agents changed most
+                agent_shifts = {}
+                for tp in turning_points:
+                    aid = tp['agent_id']
+                    agent_shifts[aid] = agent_shifts.get(aid, 0) + abs(tp['delta'])
+                most_changed = sorted(agent_shifts.items(), key=lambda x: x[1], reverse=True)[:5]
+                if most_changed:
+                    lines.append("**Agents with most belief change:**")
+                    for aid, total_delta in most_changed:
+                        lines.append(f"  - Agent {aid}: total shift magnitude {total_delta:.3f}")
+                    lines.append("")
+            else:
+                lines.append("No significant belief shifts detected — opinions remained stable.")
+                lines.append("")
+
+        return "\n".join(lines)
+
+    def _get_simulation_dir(self) -> str:
+        """Find the simulation directory (tries multiple locations)."""
+        candidates = [
+            os.path.join(Config.UPLOAD_FOLDER, 'simulations', self.simulation_id),
+            os.path.join(os.path.dirname(__file__), '..', '..', 'pipeline_test_output', self.simulation_id),
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+        return candidates[0]  # return default even if missing
+
+    def _execute_simulation_feed(self, parameters: Dict[str, Any]) -> str:
+        """Read actual simulation posts, comments, and trades."""
+        platform_filter = parameters.get("platform", "all")
+        query_filter = (parameters.get("query", "") or "").lower()
+        round_filter = parameters.get("round_num")
+        if isinstance(round_filter, str):
+            round_filter = int(round_filter) if round_filter.isdigit() else None
+
+        sim_dir = self._get_simulation_dir()
+        lines = ["=== Simulation Feed ==="]
+
+        platforms = ["twitter", "reddit", "polymarket"] if platform_filter == "all" else [platform_filter]
+        total_actions = 0
+
+        for platform in platforms:
+            actions_path = os.path.join(sim_dir, platform, "actions.jsonl")
+            if not os.path.exists(actions_path):
+                continue
+
+            try:
+                with open(actions_path, 'r', encoding='utf-8') as f:
+                    all_entries = [json.loads(l) for l in f if l.strip()]
+            except Exception:
+                continue
+
+            # Filter to real actions (not metadata)
+            actions = [a for a in all_entries if 'action_type' in a]
+
+            # Apply round filter
+            if round_filter is not None:
+                actions = [a for a in actions if a.get('round_num') == round_filter]
+
+            # Apply keyword filter
+            if query_filter:
+                actions = [
+                    a for a in actions
+                    if query_filter in json.dumps(a.get('action_args', {})).lower()
+                    or query_filter in (a.get('agent_name', '') or '').lower()
+                ]
+
+            if not actions:
+                continue
+
+            lines.append(f"\n**[{platform.upper()}]** — {len(actions)} actions")
+
+            # Action breakdown
+            from collections import Counter
+            types = Counter(a['action_type'] for a in actions)
+            lines.append(f"  Breakdown: {', '.join(f'{t}: {c}' for t, c in types.most_common())}")
+
+            # Show content-producing actions
+            content_actions = [
+                a for a in actions
+                if a.get('action_type') in (
+                    'CREATE_POST', 'CREATE_COMMENT', 'QUOTE_POST',
+                    'create_post', 'create_comment',
+                    'BUY_SHARES', 'SELL_SHARES', 'COMMENT_ON_MARKET',
+                )
+            ]
+
+            for a in content_actions[:15]:
+                agent = a.get('agent_name', f"Agent_{a.get('agent_id', '?')}")
+                atype = a.get('action_type', '')
+                args = a.get('action_args', {})
+                rnd = a.get('round_num', '?')
+
+                content = args.get('content', '') or args.get('quote_content', '')
+                if content:
+                    lines.append(f"  [R{rnd}] {agent} ({atype}): \"{content[:250]}\"")
+                elif atype in ('BUY_SHARES', 'SELL_SHARES'):
+                    outcome = args.get('outcome', '?')
+                    amount = args.get('amount_usd', args.get('num_shares', '?'))
+                    mid = args.get('market_id', '?')
+                    lines.append(f"  [R{rnd}] {agent} {atype}: market#{mid} {outcome} ${amount}")
+
+            total_actions += len(actions)
+
+        if total_actions == 0:
+            lines.append(f"\nNo simulation data found in: {sim_dir}")
+            lines.append("Available directories:")
+            if os.path.exists(sim_dir):
+                for item in os.listdir(sim_dir):
+                    lines.append(f"  - {item}")
+
+        return "\n".join(lines)
+
+    def _execute_market_state(self) -> str:
+        """Read Polymarket final state from SQLite."""
+        import sqlite3
+
+        sim_dir = self._get_simulation_dir()
+        db_path = os.path.join(sim_dir, "polymarket_simulation.db")
+
+        if not os.path.exists(db_path):
+            return f"No Polymarket database found at {db_path}"
+
+        lines = ["=== Polymarket Final State ==="]
+
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+
+            # Markets
+            for m in conn.execute("SELECT * FROM market ORDER BY market_id"):
+                ra, rb = m['reserve_a'], m['reserve_b']
+                total = ra + rb
+                price_yes = rb / total if total > 0 else 0.5
+                trades = conn.execute(
+                    "SELECT COUNT(*) FROM trade WHERE market_id=?", (m['market_id'],)
+                ).fetchone()[0]
+                lines.append(f"\n**Market #{m['market_id']}:** \"{m['question']}\"")
+                lines.append(f"  Current price: YES ${price_yes:.3f} / NO ${1-price_yes:.3f}")
+                lines.append(f"  Total trades: {trades}")
+
+            # Trade history
+            trades = conn.execute(
+                "SELECT t.*, u.user_name FROM trade t "
+                "LEFT JOIN user u ON t.user_id = u.user_id ORDER BY t.rowid"
+            ).fetchall()
+            if trades:
+                lines.append(f"\n**Trade History** ({len(trades)} trades):")
+                for t in trades:
+                    agent = t['user_name'] or f"Agent_{t['user_id']}"
+                    side = t['side'].upper()
+                    lines.append(
+                        f"  {side:4s} | {agent:30s} | {t['outcome']:3s} "
+                        f"{t['shares']:.0f} shares @ ${t['price']:.3f} "
+                        f"(${abs(t['cost']):.0f})"
+                    )
+
+            # Portfolios with P&L
+            lines.append(f"\n**Trader P&L:**")
+            for row in conn.execute(
+                "SELECT p.user_id, p.balance, u.user_name FROM portfolio p "
+                "LEFT JOIN user u ON p.user_id = u.user_id ORDER BY p.user_id"
+            ):
+                uid = row['user_id']
+                agent = row['user_name'] or f"Agent_{uid}"
+                balance = row['balance']
+
+                pos_value = 0
+                for pos in conn.execute(
+                    "SELECT pos.shares, pos.outcome, m.reserve_a, m.reserve_b, m.outcome_a "
+                    "FROM position pos JOIN market m ON pos.market_id = m.market_id "
+                    "WHERE pos.user_id = ? AND pos.shares > 0.01", (uid,)
+                ):
+                    ra, rb = pos['reserve_a'], pos['reserve_b']
+                    tot = ra + rb
+                    cp = (rb/tot) if pos['outcome'] == pos['outcome_a'] else (ra/tot)
+                    pos_value += pos['shares'] * cp
+
+                total_val = balance + pos_value
+                pnl = total_val - 1000
+                lines.append(
+                    f"  {agent:30s} | Cash: ${balance:.0f} | "
+                    f"Positions: ${pos_value:.0f} | Total: ${total_val:.0f} | "
+                    f"P&L: {'+'if pnl>=0 else ''}{pnl:.0f}"
+                )
+
+            conn.close()
+        except Exception as e:
+            lines.append(f"Error reading market data: {e}")
+
+        return "\n".join(lines)
 
     def _parse_tool_calls(self, response: str) -> List[Dict[str, Any]]:
         """
@@ -1213,7 +1681,7 @@ class ReportAgent:
             logger.error(f"Outline planning failed: {str(e)}")
             # Return default outline (3 sections, as fallback)
             return ReportOutline(
-                title="Future Prediction Report",
+                title="Scenario Exploration Report",
                 summary="Future trend and risk analysis based on simulation predictions",
                 sections=[
                     ReportSection(title="Prediction Scenario and Core Findings"),
@@ -1534,6 +2002,65 @@ class ReportAgent:
         
         return final_answer
     
+    def _generate_synthesis(
+        self,
+        generated_sections: List[str],
+        outline: 'ReportOutline',
+    ) -> Optional[str]:
+        """Generate cross-section synthesis — patterns, contradictions, and meta-insights.
+
+        This runs after all sections are generated and identifies:
+        - Patterns spanning ACROSS sections
+        - Contradictions between sections
+        - The single most important non-obvious insight
+        - What the report CANNOT answer and why
+
+        Returns:
+            Synthesis text to append to the last section, or None if generation fails.
+        """
+        if len(generated_sections) < 2:
+            return None
+
+        all_content = "\n\n---\n\n".join(
+            sec[:3000] for sec in generated_sections
+        )
+
+        system_prompt = (
+            "You are an expert analyst performing a cross-section synthesis of a scenario exploration report. "
+            "You have just written all the sections below. Now step back and identify meta-patterns."
+        )
+
+        user_prompt = f"""\
+Here are the sections you've written:
+
+{all_content}
+
+Now write a brief synthesis (300-500 words) that addresses:
+
+1. **Cross-cutting patterns**: What themes or dynamics appear across multiple sections? What connects them?
+2. **Internal contradictions**: Do any sections contain findings that tension or contradict each other? What does this tension reveal?
+3. **The core insight**: In one sentence, what is the single most important non-obvious finding from this entire simulation?
+4. **Epistemic limits**: What important question does this simulation NOT answer? What would we need to investigate further?
+
+Write in the same analytical style as the report. Use **bold** for emphasis. Do NOT use any headings (#, ##, etc.)."""
+
+        try:
+            response = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.4,
+                max_tokens=2048,
+            )
+            if response:
+                logger.info("Cross-section synthesis generated successfully")
+                return response.strip()
+        except Exception as e:
+            logger.warning(f"Synthesis generation failed: {e}")
+
+        return None
+
     def generate_report(
         self,
         progress_callback: Optional[Callable[[str, int, str], None]] = None,
@@ -1699,15 +2226,33 @@ class ReportAgent:
                     completed_sections=completed_section_titles
                 )
             
+            # Phase 2.5: Cross-section synthesis
+            if progress_callback:
+                progress_callback("generating", 92, "Synthesizing cross-section insights...")
+
+            ReportManager.update_progress(
+                report_id, "generating", 92, "Synthesizing cross-section insights...",
+                completed_sections=completed_section_titles
+            )
+
+            synthesis = self._generate_synthesis(generated_sections, outline)
+            if synthesis:
+                # Append synthesis to the last section's content (which should be the synthesis section)
+                last_section = outline.sections[-1]
+                last_section.content = (last_section.content or "") + "\n\n" + synthesis
+                # Re-save the last section
+                ReportManager.save_section(report_id, len(outline.sections), last_section)
+                generated_sections[-1] = f"## {last_section.title}\n\n{last_section.content}"
+
             # Phase 3: Assemble complete report
             if progress_callback:
                 progress_callback("generating", 95, "Assembling complete report...")
-            
+
             ReportManager.update_progress(
                 report_id, "generating", 95, "Assembling complete report...",
                 completed_sections=completed_section_titles
             )
-            
+
             # Use ReportManager to assemble complete report
             report.markdown_content = ReportManager.assemble_full_report(report_id, outline)
             report.status = ReportStatus.COMPLETED

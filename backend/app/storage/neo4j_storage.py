@@ -192,7 +192,15 @@ class Neo4jStorage(GraphStorage):
         )
 
         # --- Batch embed all texts at once ---
-        entity_summaries = [f"{e['name']} ({e['type']})" for e in entities]
+        # Build summaries: prefer NER-extracted summary from attributes, fall back to Name (Type)
+        entity_summaries = []
+        for e in entities:
+            attrs = e.get("attributes", {})
+            summary = attrs.pop("summary", None) or attrs.get("description", None)
+            if summary and len(str(summary)) > 10:
+                entity_summaries.append(str(summary))
+            else:
+                entity_summaries.append(f"{e['name']} ({e['type']})")
         fact_texts = [r.get("fact", f"{r['source']} {r['type']} {r['target']}") for r in relations]
         all_texts_to_embed = entity_summaries + fact_texts
 
@@ -230,74 +238,82 @@ class Neo4jStorage(GraphStorage):
 
             self._call_with_retry(session.execute_write, _create_episode)
 
-            # MERGE entities (upsert by graph_id + name + primary label)
+            # MERGE entities in batch (UNWIND for bulk upsert)
             entity_uuid_map: Dict[str, str] = {}  # name_lower -> uuid
+            entity_batch = []
+            label_batch: Dict[str, list] = {}  # label -> [name_lower, ...]
+
             for idx, entity in enumerate(entities):
                 ename = entity["name"]
                 etype = entity["type"]
                 attrs = entity.get("attributes", {})
                 summary_text = entity_summaries[idx]
                 embedding = entity_embeddings[idx] if idx < len(entity_embeddings) else []
-
                 e_uuid = str(uuid.uuid4())
                 entity_uuid_map[ename.lower()] = e_uuid
 
-                def _merge_entity(tx, _uuid=e_uuid, _name=ename, _type=etype,
-                                  _attrs=attrs, _embedding=embedding,
-                                  _summary=summary_text, _now=now):
-                    # MERGE by graph_id + lowercase name to deduplicate
+                entity_batch.append({
+                    "uuid": e_uuid,
+                    "name": ename,
+                    "name_lower": ename.lower(),
+                    "summary": summary_text,
+                    "attrs_json": json.dumps(attrs, ensure_ascii=False),
+                    "embedding": embedding,
+                })
+
+                if etype and etype != "Entity":
+                    label_batch.setdefault(etype, []).append(ename.lower())
+
+            if entity_batch:
+                def _merge_entities_batch(tx, _batch=entity_batch):
                     result = tx.run(
                         """
-                        MERGE (n:Entity {graph_id: $gid, name_lower: $name_lower})
+                        UNWIND $batch AS e
+                        MERGE (n:Entity {graph_id: $gid, name_lower: e.name_lower})
                         ON CREATE SET
-                            n.uuid = $uuid,
-                            n.name = $name,
-                            n.summary = $summary,
-                            n.attributes_json = $attrs_json,
-                            n.embedding = $embedding,
+                            n.uuid = e.uuid,
+                            n.name = e.name,
+                            n.summary = e.summary,
+                            n.attributes_json = e.attrs_json,
+                            n.embedding = e.embedding,
                             n.created_at = $now
                         ON MATCH SET
                             n.summary = CASE WHEN n.summary = '' OR n.summary IS NULL
-                                THEN $summary ELSE n.summary END,
-                            n.attributes_json = $attrs_json,
-                            n.embedding = $embedding
-                        RETURN n.uuid AS uuid
+                                THEN e.summary ELSE n.summary END,
+                            n.attributes_json = e.attrs_json,
+                            n.embedding = e.embedding
+                        RETURN e.name_lower AS name_lower, n.uuid AS uuid
                         """,
+                        batch=_batch,
                         gid=graph_id,
-                        name_lower=_name.lower(),
-                        uuid=_uuid,
-                        name=_name,
-                        summary=_summary,
-                        attrs_json=json.dumps(_attrs, ensure_ascii=False),
-                        embedding=_embedding,
-                        now=_now,
+                        now=now,
                     )
-                    record = result.single()
-                    return record["uuid"] if record else _uuid
+                    return [(r["name_lower"], r["uuid"]) for r in result]
 
-                actual_uuid = self._call_with_retry(session.execute_write, _merge_entity)
-                entity_uuid_map[ename.lower()] = actual_uuid
+                uuid_pairs = self._call_with_retry(session.execute_write, _merge_entities_batch)
+                for name_lower, actual_uuid in uuid_pairs:
+                    entity_uuid_map[name_lower] = actual_uuid
 
-                # Add entity type label
-                if etype and etype != "Entity":
+                # Add type labels in batch (one query per label type)
+                for label, name_lowers in label_batch.items():
                     try:
-                        def _add_label(tx, _name_lower=ename.lower()):
+                        def _add_labels(tx, _label=label, _names=name_lowers):
                             tx.run(
-                                f"MATCH (n:Entity {{graph_id: $gid, name_lower: $nl}}) SET n:`{etype}`",
+                                f"UNWIND $names AS nl "
+                                f"MATCH (n:Entity {{graph_id: $gid, name_lower: nl}}) "
+                                f"SET n:`{_label}`",
+                                names=_names,
                                 gid=graph_id,
-                                nl=_name_lower,
                             )
-                        self._call_with_retry(session.execute_write, _add_label)
+                        self._call_with_retry(session.execute_write, _add_labels)
                     except Exception as e:
-                        logger.warning(f"Failed to add label '{etype}' to '{ename}': {e}")
+                        logger.warning(f"Failed to add label '{label}': {e}")
 
-            # Create relations
+            # Create relations in batch (UNWIND)
+            relation_batch = []
             for idx, relation in enumerate(relations):
                 source_name = relation["source"]
                 target_name = relation["target"]
-                rtype = relation["type"]
-                fact = relation["fact"]
-
                 source_uuid = entity_uuid_map.get(source_name.lower())
                 target_uuid = entity_uuid_map.get(target_name.lower())
 
@@ -309,42 +325,43 @@ class Neo4jStorage(GraphStorage):
                     continue
 
                 fact_embedding = relation_embeddings[idx] if idx < len(relation_embeddings) else []
-                r_uuid = str(uuid.uuid4())
+                relation_batch.append({
+                    "uuid": str(uuid.uuid4()),
+                    "src_uuid": source_uuid,
+                    "tgt_uuid": target_uuid,
+                    "name": relation["type"],
+                    "fact": relation["fact"],
+                    "fact_embedding": fact_embedding,
+                    "episode_id": episode_id,
+                })
 
-                def _create_relation(tx, _r_uuid=r_uuid, _source_uuid=source_uuid,
-                                     _target_uuid=target_uuid, _rtype=rtype,
-                                     _fact=fact, _fact_emb=fact_embedding,
-                                     _episode_id=episode_id, _now=now):
+            if relation_batch:
+                def _create_relations_batch(tx, _batch=relation_batch):
                     tx.run(
                         """
-                        MATCH (src:Entity {uuid: $src_uuid})
-                        MATCH (tgt:Entity {uuid: $tgt_uuid})
-                        CREATE (src)-[r:RELATION {
-                            uuid: $uuid,
+                        UNWIND $batch AS r
+                        MATCH (src:Entity {uuid: r.src_uuid})
+                        MATCH (tgt:Entity {uuid: r.tgt_uuid})
+                        CREATE (src)-[rel:RELATION {
+                            uuid: r.uuid,
                             graph_id: $gid,
-                            name: $name,
-                            fact: $fact,
-                            fact_embedding: $fact_embedding,
+                            name: r.name,
+                            fact: r.fact,
+                            fact_embedding: r.fact_embedding,
                             attributes_json: '{}',
-                            episode_ids: [$episode_id],
+                            episode_ids: [r.episode_id],
                             created_at: $now,
                             valid_at: null,
                             invalid_at: null,
                             expired_at: null
                         }]->(tgt)
                         """,
-                        src_uuid=_source_uuid,
-                        tgt_uuid=_target_uuid,
-                        uuid=_r_uuid,
+                        batch=_batch,
                         gid=graph_id,
-                        name=_rtype,
-                        fact=_fact,
-                        fact_embedding=_fact_emb,
-                        episode_id=_episode_id,
-                        now=_now,
+                        now=now,
                     )
 
-                self._call_with_retry(session.execute_write, _create_relation)
+                self._call_with_retry(session.execute_write, _create_relations_batch)
 
         logger.info(f"[add_text] Chunk done: episode={episode_id}")
         return episode_id
@@ -655,3 +672,244 @@ class Neo4jStorage(GraphStorage):
             "expired_at": props.get("expired_at"),
             "episode_ids": episode_ids,
         }
+
+    # ================================================================
+    # Graph reasoning queries (Cypher-native, no GDS dependency)
+    # ================================================================
+
+    def get_degree_centrality(self, graph_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Top entities by total relationship count (degree centrality)."""
+        def _read(tx):
+            result = tx.run(
+                """
+                MATCH (n:Entity {graph_id: $gid})-[r:RELATION]-()
+                WITH n, labels(n) AS labels, count(r) AS degree
+                ORDER BY degree DESC
+                LIMIT $limit
+                RETURN n.name AS name, n.uuid AS uuid,
+                       [l IN labels WHERE l <> 'Entity'] AS types,
+                       n.summary AS summary, degree
+                """,
+                gid=graph_id,
+                limit=limit,
+            )
+            return [dict(record) for record in result]
+
+        with self._driver.session() as session:
+            return self._call_with_retry(session.execute_read, _read)
+
+    def get_bridge_entities(self, graph_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Entities that connect otherwise separate clusters (high betweenness approximation).
+
+        Uses a heuristic: entities whose neighbors have the least overlap with each other.
+        """
+        def _read(tx):
+            result = tx.run(
+                """
+                MATCH (n:Entity {graph_id: $gid})-[:RELATION]-(neighbor)
+                WITH n, labels(n) AS labels, collect(DISTINCT neighbor.uuid) AS neighbors, count(DISTINCT neighbor) AS deg
+                WHERE deg >= 2
+                WITH n, labels, neighbors, deg,
+                     // Count how many of n's neighbors are connected to each other
+                     size([i IN range(0, size(neighbors)-2) |
+                           [j IN range(i+1, size(neighbors)-1) |
+                            EXISTS { MATCH (a:Entity {uuid: neighbors[i]})-[:RELATION]-(b:Entity {uuid: neighbors[j]}) }
+                           ]
+                          ]) AS internal_edges
+                // Bridge score: high degree but low internal connectivity
+                WITH n, labels, deg, internal_edges,
+                     toFloat(deg) / (CASE WHEN internal_edges > 0 THEN internal_edges ELSE 0.5 END) AS bridge_score
+                ORDER BY bridge_score DESC
+                LIMIT $limit
+                RETURN n.name AS name, n.uuid AS uuid,
+                       [l IN labels WHERE l <> 'Entity'] AS types,
+                       n.summary AS summary, deg AS degree, bridge_score
+                """,
+                gid=graph_id,
+                limit=limit,
+            )
+            return [dict(record) for record in result]
+
+        try:
+            with self._driver.session() as session:
+                return self._call_with_retry(session.execute_read, _read)
+        except Exception as e:
+            logger.warning(f"Bridge entity query failed (may need Neo4j 5.9+ for EXISTS subquery): {e}")
+            # Fallback: just return high-degree nodes
+            return self.get_degree_centrality(graph_id, limit)
+
+    def get_shortest_path(
+        self, graph_id: str, source_name: str, target_name: str, max_hops: int = 6
+    ) -> List[Dict[str, Any]]:
+        """Find shortest path between two named entities."""
+        def _read(tx):
+            result = tx.run(
+                """
+                MATCH (a:Entity {graph_id: $gid}), (b:Entity {graph_id: $gid})
+                WHERE toLower(a.name) CONTAINS toLower($src)
+                  AND toLower(b.name) CONTAINS toLower($tgt)
+                WITH a, b LIMIT 1
+                MATCH p = shortestPath((a)-[:RELATION*1..6]-(b))
+                UNWIND relationships(p) AS r
+                WITH r, startNode(r) AS sn, endNode(r) AS en
+                RETURN sn.name AS source, r.name AS relation, r.fact AS fact, en.name AS target
+                """,
+                gid=graph_id,
+                src=source_name,
+                tgt=target_name,
+            )
+            return [dict(record) for record in result]
+
+        with self._driver.session() as session:
+            return self._call_with_retry(session.execute_read, _read)
+
+    def get_entity_communities(self, graph_id: str) -> List[List[Dict[str, Any]]]:
+        """Detect communities using weakly connected components via Cypher.
+
+        Returns a list of communities (each is a list of node dicts), sorted largest first.
+        """
+        def _read(tx):
+            # Get all nodes and their neighbors to build adjacency
+            result = tx.run(
+                """
+                MATCH (n:Entity {graph_id: $gid})
+                OPTIONAL MATCH (n)-[:RELATION]-(m:Entity {graph_id: $gid})
+                RETURN n.uuid AS node_uuid, n.name AS name,
+                       [l IN labels(n) WHERE l <> 'Entity'] AS types,
+                       n.summary AS summary,
+                       collect(DISTINCT m.uuid) AS neighbor_uuids
+                """,
+                gid=graph_id,
+            )
+            return [dict(record) for record in result]
+
+        with self._driver.session() as session:
+            nodes_data = self._call_with_retry(session.execute_read, _read)
+
+        # Build adjacency and run union-find
+        uuid_to_info = {}
+        adjacency = {}
+        for nd in nodes_data:
+            uid = nd["node_uuid"]
+            uuid_to_info[uid] = {
+                "uuid": uid,
+                "name": nd["name"],
+                "types": nd["types"],
+                "summary": nd["summary"],
+            }
+            adjacency[uid] = [u for u in nd["neighbor_uuids"] if u]
+
+        # Union-Find
+        parent = {uid: uid for uid in uuid_to_info}
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        for uid, neighbors in adjacency.items():
+            for nid in neighbors:
+                if nid in parent:
+                    union(uid, nid)
+
+        # Group by component
+        components: Dict[str, list] = {}
+        for uid in uuid_to_info:
+            root = find(uid)
+            components.setdefault(root, []).append(uuid_to_info[uid])
+
+        # Sort by size descending
+        communities = sorted(components.values(), key=len, reverse=True)
+        return communities
+
+    def detect_contradictions(self, graph_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Find node pairs connected by multiple edges with potentially contradicting facts.
+
+        Looks for node pairs that have 2+ edges and checks for opposing sentiment signals.
+        """
+        def _read(tx):
+            result = tx.run(
+                """
+                MATCH (a:Entity {graph_id: $gid})-[r:RELATION]->(b:Entity {graph_id: $gid})
+                WITH a, b, collect({fact: r.fact, name: r.name, created_at: r.created_at}) AS edges
+                WHERE size(edges) >= 2
+                RETURN a.name AS source_name, a.uuid AS source_uuid,
+                       b.name AS target_name, b.uuid AS target_uuid,
+                       edges
+                ORDER BY size(edges) DESC
+                LIMIT $limit
+                """,
+                gid=graph_id,
+                limit=limit,
+            )
+            return [dict(record) for record in result]
+
+        with self._driver.session() as session:
+            pairs = self._call_with_retry(session.execute_read, _read)
+
+        # Heuristic: check for opposing sentiment in facts
+        positive_words = {"support", "agree", "approve", "benefit", "positive", "welcome", "praise"}
+        negative_words = {"oppose", "disagree", "reject", "harm", "negative", "condemn", "criticize"}
+
+        contradictions = []
+        for pair in pairs:
+            facts = pair["edges"]
+            sentiments = []
+            for edge in facts:
+                fact = (edge.get("fact") or "").lower()
+                pos = sum(1 for w in positive_words if w in fact)
+                neg = sum(1 for w in negative_words if w in fact)
+                if pos > neg:
+                    sentiments.append("positive")
+                elif neg > pos:
+                    sentiments.append("negative")
+                else:
+                    sentiments.append("neutral")
+
+            # A contradiction exists if we have both positive and negative
+            has_positive = "positive" in sentiments
+            has_negative = "negative" in sentiments
+            if has_positive and has_negative:
+                contradictions.append({
+                    "source_name": pair["source_name"],
+                    "target_name": pair["target_name"],
+                    "edges": facts,
+                    "sentiments": sentiments,
+                    "contradiction_type": "opposing_sentiments",
+                })
+
+        return contradictions
+
+    def get_temporal_evolution(self, graph_id: str) -> Dict[str, List[Dict[str, Any]]]:
+        """Group edges by creation time to show how the graph evolved."""
+        def _read(tx):
+            result = tx.run(
+                """
+                MATCH (src:Entity {graph_id: $gid})-[r:RELATION {graph_id: $gid}]->(tgt:Entity)
+                WHERE r.created_at IS NOT NULL
+                RETURN r.created_at AS created_at, r.fact AS fact, r.name AS relation,
+                       src.name AS source_name, tgt.name AS target_name
+                ORDER BY r.created_at
+                """,
+                gid=graph_id,
+            )
+            return [dict(record) for record in result]
+
+        with self._driver.session() as session:
+            edges = self._call_with_retry(session.execute_read, _read)
+
+        # Group into time buckets (by episode/created_at)
+        buckets: Dict[str, list] = {}
+        for edge in edges:
+            ts = str(edge.get("created_at", "unknown"))
+            # Group by date portion if it's a datetime string
+            date_key = ts[:10] if len(ts) >= 10 else ts
+            buckets.setdefault(date_key, []).append(edge)
+
+        return buckets

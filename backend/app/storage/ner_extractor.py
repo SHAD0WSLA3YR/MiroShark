@@ -27,6 +27,54 @@ RULES:
 4. Each relation must have: source entity name, target entity name, type (from ontology), and a fact sentence describing the relationship.
 5. If no entities or relations are found, return empty lists.
 6. Be precise — only extract what is explicitly stated or strongly implied in the text.
+7. Merge co-references: "the company", "it", "the firm" all resolve to the canonical entity name.
+8. Fact sentences should be self-contained and readable without the original text.
+
+REJECTION RULES (critical):
+9. REJECT fragments and descriptions as entity names. "NYU dropout", "the founder", \
+"a large company", "CO" are NOT valid entity names. Entity names must be proper nouns \
+or specific identifiers (e.g., "Shayne Coplan", "Polymarket", "CFTC").
+10. REJECT abstract concepts and events as entities unless they match the ontology. \
+"prediction markets", "US presidential election", "blockchain technology" are NOT entities \
+unless the ontology explicitly defines them as a type.
+11. When the same entity appears with a short name AND a full name (e.g., "Hanson" and \
+"Robin Hanson"), use ONLY the full canonical name.
+12. For the "summary" in attributes, extract a SHORT factual sentence from the text that \
+describes what this entity IS or DOES. Not just "Name (Type)" — e.g., \
+"Polymarket is a prediction market platform founded in 2020" or \
+"Shayne Coplan is the 26-year-old founder of Polymarket".
+
+EXAMPLES:
+
+Example input: "Tesla CEO Elon Musk announced plans to cut 10% of the workforce. The move was criticized by the United Auto Workers union."
+Example output:
+{{
+  "entities": [
+    {{"name": "Elon Musk", "type": "PublicFigure", "attributes": {{"role": "CEO"}}}},
+    {{"name": "Tesla", "type": "Company", "attributes": {{"industry": "automotive"}}}},
+    {{"name": "United Auto Workers", "type": "Organization", "attributes": {{"type": "labor union"}}}}
+  ],
+  "relations": [
+    {{"source": "Elon Musk", "target": "Tesla", "type": "LEADS", "fact": "Elon Musk is the CEO of Tesla."}},
+    {{"source": "Tesla", "target": "United Auto Workers", "type": "OPPOSES", "fact": "Tesla's plan to cut 10% of workforce was criticized by the United Auto Workers union."}}
+  ]
+}}
+
+Example input: "Senator Warren introduced the AI Accountability Act, which would require companies to disclose training data. Google and OpenAI lobbied against the bill."
+Example output:
+{{
+  "entities": [
+    {{"name": "Elizabeth Warren", "type": "Politician", "attributes": {{"role": "Senator"}}}},
+    {{"name": "AI Accountability Act", "type": "Policy", "attributes": {{"status": "introduced"}}}},
+    {{"name": "Google", "type": "Company", "attributes": {{}}}},
+    {{"name": "OpenAI", "type": "Company", "attributes": {{}}}}
+  ],
+  "relations": [
+    {{"source": "Elizabeth Warren", "target": "AI Accountability Act", "type": "PROPOSES", "fact": "Senator Elizabeth Warren introduced the AI Accountability Act."}},
+    {{"source": "Google", "target": "AI Accountability Act", "type": "OPPOSES", "fact": "Google lobbied against the AI Accountability Act."}},
+    {{"source": "OpenAI", "target": "AI Accountability Act", "type": "OPPOSES", "fact": "OpenAI lobbied against the AI Accountability Act."}}
+  ]
+}}
 
 Return ONLY valid JSON in this exact format:
 {{
@@ -181,8 +229,30 @@ class NERExtractor:
             if not name:
                 continue
 
-            # Deduplicate by normalized name
+            # Reject fragments: too short, all-lowercase generic phrases, single letters
             name_lower = name.lower()
+            if len(name) <= 2:
+                logger.debug(f"Rejecting fragment entity: '{name}' (too short)")
+                continue
+            if " " not in name and name_lower == name and len(name) < 5:
+                # Single lowercase short word like "co", "the" — not a proper noun
+                logger.debug(f"Rejecting fragment entity: '{name}' (not a proper noun)")
+                continue
+            # Reject descriptive phrases (contain common descriptors)
+            _reject_prefixes = (
+                "a ", "an ", "the ", "some ", "this ", "that ", "his ", "her ",
+                "their ", "our ", "my ", "its ",
+            )
+            if any(name_lower.startswith(p) for p in _reject_prefixes):
+                logger.debug(f"Rejecting descriptive entity: '{name}'")
+                continue
+            _reject_suffixes = (" dropout", " founder", " user", " trader", " official")
+            if any(name_lower.endswith(s) for s in _reject_suffixes):
+                # "NYU dropout" is not an entity, but "NYU" is
+                logger.debug(f"Rejecting descriptive entity: '{name}'")
+                continue
+
+            # Deduplicate by normalized name
             if name_lower in seen_names:
                 continue
             seen_names.add(name_lower)

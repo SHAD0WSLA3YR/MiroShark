@@ -321,7 +321,11 @@ class SimulationManager:
                 )
 
             # Pass graph_id to enable graph retrieval for richer context
-            generator = OasisProfileGenerator(storage=storage, graph_id=state.graph_id)
+            generator = OasisProfileGenerator(
+                storage=storage,
+                graph_id=state.graph_id,
+                simulation_requirement=simulation_requirement,
+            )
             
             def profile_progress(current, total, msg):
                 if progress_callback:

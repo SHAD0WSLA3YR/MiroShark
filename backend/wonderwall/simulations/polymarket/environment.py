@@ -23,53 +23,89 @@ class PolymarketEnvironment(BaseEnvironment):
     """Converts Polymarket state into the text prompt the agent observes."""
 
     async def to_text_prompt(self) -> str:
-        # Fetch current portfolio
         portfolio = await self.action.view_portfolio()
-        # Fetch active markets
         markets = await self.action.browse_markets()
 
         parts = []
 
         if portfolio.get("success"):
-            parts.append(
-                f"YOUR PORTFOLIO:\n"
-                f"  Cash balance: ${portfolio['balance']:.2f}"
-            )
-            if portfolio.get("positions"):
-                parts.append("  Your positions:")
-                for pos in portfolio["positions"]:
+            balance = portfolio['balance']
+            parts.append(f"YOUR PORTFOLIO:\n  Cash: ${balance:.2f}")
+
+            positions = portfolio.get("positions", [])
+            if positions:
+                total_invested = 0
+                total_value = 0
+                parts.append("  Open positions:")
+                for pos in positions:
+                    cost_basis = pos['shares'] * 0.50  # approximate (bought near 0.50)
+                    current_value = pos['current_value']
+                    pnl = current_value - cost_basis
+                    pnl_pct = (pnl / cost_basis * 100) if cost_basis > 0 else 0
+                    total_invested += cost_basis
+                    total_value += current_value
+
+                    # Flag actionable positions
+                    flag = ""
+                    if pos['current_price'] > 0.90:
+                        flag = " ⚠️ PRICE NEAR MAX — consider taking profit"
+                    elif pos['current_price'] < 0.10:
+                        flag = " ⚠️ PRICE NEAR ZERO — consider cutting loss"
+                    elif pnl_pct > 30:
+                        flag = " 📈 IN PROFIT — consider selling some"
+                    elif pnl_pct < -30:
+                        flag = " 📉 AT LOSS — reassess your thesis"
+
                     parts.append(
                         f"    - Market #{pos['market_id']}: "
                         f"\"{pos['question']}\" — "
                         f"{pos['shares']:.1f} {pos['outcome']} shares "
                         f"@ ${pos['current_price']:.3f} "
-                        f"(value: ${pos['current_value']:.2f})"
+                        f"(value: ${current_value:.2f}, "
+                        f"P&L: {'+'if pnl>=0 else ''}{pnl:.2f})"
+                        f"{flag}"
                     )
+
+                portfolio_value = balance + total_value
+                parts.append(f"  Total portfolio value: ${portfolio_value:.2f}")
             else:
-                parts.append("  You have no open positions.")
+                parts.append("  No open positions.")
 
         if markets.get("success") and markets.get("markets"):
             parts.append("\nACTIVE MARKETS:")
             for m in markets["markets"]:
-                # Extract price keys dynamically
                 price_keys = [k for k in m if k.startswith("price_")]
                 price_str = ", ".join(
-                    f"{k.replace('price_', '')}: "
-                    f"${m[k]:.3f}"
+                    f"{k.replace('price_', '')}: ${m[k]:.3f}"
                     for k in price_keys
                 )
+                num_trades = m.get('num_trades', 0)
+
+                # Highlight markets with extreme prices (potential sell/contrarian signal)
+                note = ""
+                for k in price_keys:
+                    if m[k] > 0.90:
+                        note = " — market is very confident, contrarian opportunity?"
+                    elif m[k] < 0.10:
+                        note = " — market is very confident, contrarian opportunity?"
+
                 parts.append(
                     f"  #{m['market_id']}: \"{m['question']}\" "
                     f"[{price_str}] "
-                    f"({m['num_trades']} trades)"
+                    f"({num_trades} trades){note}"
                 )
         else:
             parts.append("\nNo active markets yet.")
 
+        # Inject cross-platform social media context directly into observation
+        if self.extra_observation_context:
+            parts.append(f"\nSOCIAL MEDIA CONTEXT:\n{self.extra_observation_context}")
+
         parts.append(
-            "\nChoose an action based on your beliefs, risk tolerance, "
-            "and portfolio. You can buy/sell shares, create markets, "
-            "comment, or do nothing."
+            "\nDecide: buy_shares, sell_shares, or do_nothing."
+            "\nConsider the social media context above — it tells you what "
+            "people are discussing on Twitter and Reddit. If social sentiment "
+            "conflicts with the market price, that's a trading signal."
         )
 
         return "\n".join(parts)

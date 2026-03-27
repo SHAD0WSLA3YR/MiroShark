@@ -73,14 +73,21 @@ class PolymarketAction(BaseAction):
 
     async def sell_shares(self, market_id: int, outcome: str,
                           num_shares: float):
-        """Sell shares of an outcome back to the market.
+        """Sell shares you own to lock in profit or cut losses.
 
-        Sell shares to receive USD. Selling pushes the price down.
+        Use this when:
+        - Your position is up and you want to take profit before a reversal
+        - The price has moved past what you think is fair value
+        - New information changed your mind about the outcome
+        - You want to rebalance (free up cash for a better opportunity)
+        - A position is near $0.95+ and the remaining upside is tiny
+
+        Selling pushes the price down. You receive USD.
 
         Args:
             market_id (int): The ID of the market.
-            outcome (str): The outcome whose shares to sell.
-            num_shares (float): Number of shares to sell.
+            outcome (str): The outcome whose shares to sell (e.g. 'YES').
+            num_shares (float): Number of shares to sell (check your positions).
 
         Returns:
             dict: Contains 'usd_received' and 'effective_price'.
@@ -115,19 +122,21 @@ class PolymarketAction(BaseAction):
 
     async def create_market(self, question: str,
                             outcome_a: str = "YES",
-                            outcome_b: str = "NO"):
-        """Create a new prediction market.
+                            outcome_b: str = "NO",
+                            initial_probability: float = 0.5):
+        """Create a new prediction market (used internally for seeding).
 
         Args:
             question (str): The question the market is about.
             outcome_a (str): First outcome label (default: 'YES').
             outcome_b (str): Second outcome label (default: 'NO').
+            initial_probability (float): Starting YES price (0.1-0.9).
 
         Returns:
             dict: Contains 'market_id' of the newly created market.
         """
         return await self.perform_action(
-            (question, outcome_a, outcome_b), "create_market"
+            (question, outcome_a, outcome_b, initial_probability), "create_market"
         )
 
     async def comment_on_market(self, market_id: int, content: str):
