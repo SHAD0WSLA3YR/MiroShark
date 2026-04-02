@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./miroshark.jpg" alt="MiroShark" width="120" />
+  <img src="./docs/images/miroshark.jpg" alt="MiroShark" width="120" />
 </p>
 
 <h1 align="center">MiroShark</h1>
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="miroshark.gif" alt="MiroShark Demo" />
+  <img src="./docs/images/miroshark.gif" alt="MiroShark Demo" />
 </p>
 
 ---
@@ -20,16 +20,16 @@
 <div align="center">
 <table>
 <tr>
-<td><img src="./screen1.png" width="100%"/></td>
-<td><img src="./screen2.png" width="100%"/></td>
+<td><img src="./docs/images/screen1.png" width="100%"/></td>
+<td><img src="./docs/images/screen2.png" width="100%"/></td>
 </tr>
 <tr>
-<td><img src="./screen3.png" width="100%"/></td>
-<td><img src="./screen4.png" width="100%"/></td>
+<td><img src="./docs/images/screen3.png" width="100%"/></td>
+<td><img src="./docs/images/screen4.png" width="100%"/></td>
 </tr>
 <tr>
-<td><img src="./screen5.png" width="100%"/></td>
-<td><img src="./screen6.png" width="100%"/></td>
+<td><img src="./docs/images/screen5.png" width="100%"/></td>
+<td><img src="./docs/images/screen6.png" width="100%"/></td>
 </tr>
 </table>
 </div>

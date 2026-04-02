@@ -49,6 +49,10 @@ htmlcov/
 mydoc/
 mytest/
 
+# Test output artifacts
+backend/e2e_test_output/
+backend/pipeline_test_output/
+
 # Log files
 backend/logs/
 *.log
