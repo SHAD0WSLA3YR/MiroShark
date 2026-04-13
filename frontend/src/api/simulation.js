@@ -270,3 +270,12 @@ export const resolveSimulation = (simulationId, data) => {
   return service.post(`/api/simulation/${simulationId}/resolve`, data)
 }
 
+/**
+ * Generate a publishable article brief from simulation results (cached).
+ * @param {string} simulationId
+ * @param {Object} options - { force_regenerate?, share_url? }
+ */
+export const generateSimulationArticle = (simulationId, options = {}) => {
+  return service.post(`/api/simulation/${simulationId}/article`, options)
+}
+
