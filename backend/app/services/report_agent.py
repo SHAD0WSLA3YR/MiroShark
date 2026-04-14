@@ -21,6 +21,7 @@ from enum import Enum
 from ..config import Config
 from ..utils.llm_client import LLMClient, create_smart_llm_client
 from ..utils.logger import get_logger
+from ..utils.validation import validate_simulation_id
 from .graph_tools import (
     GraphToolsService,
     SearchResult,
@@ -1372,6 +1373,7 @@ class ReportAgent:
 
     def _get_simulation_dir(self) -> str:
         """Find the simulation directory (tries multiple locations)."""
+        validate_simulation_id(self.simulation_id)
         candidates = [
             os.path.join(Config.UPLOAD_FOLDER, 'simulations', self.simulation_id),
             os.path.join(os.path.dirname(__file__), '..', '..', 'pipeline_test_output', self.simulation_id),

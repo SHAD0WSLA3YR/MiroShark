@@ -16,8 +16,21 @@ from ..services.simulation_manager import SimulationManager
 from ..models.project import ProjectManager
 from ..models.task import TaskManager, TaskStatus
 from ..utils.logger import get_logger
+from ..utils.validation import validate_simulation_id
 
 logger = get_logger('miroshark.api.report')
+
+
+@report_bp.before_request
+def _validate_url_simulation_id():
+    """Reject requests whose URL-derived simulation_id could cause path traversal."""
+    from flask import request as _req
+    sim_id = _req.view_args.get('simulation_id') if _req.view_args else None
+    if sim_id is not None:
+        try:
+            validate_simulation_id(sim_id)
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
 
 
 # ============== Report Generation Endpoints ==============
@@ -56,6 +69,10 @@ def generate_report():
                 "success": False,
                 "error": "Please provide simulation_id"
             }), 400
+        try:
+            validate_simulation_id(simulation_id)
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
 
         force_regenerate = data.get('force_regenerate', False)
 
@@ -231,6 +248,11 @@ def get_generate_status():
 
         task_id = data.get('task_id')
         simulation_id = data.get('simulation_id')
+        if simulation_id:
+            try:
+                validate_simulation_id(simulation_id)
+            except ValueError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
 
         # If simulation_id is provided, first check if a completed report exists
         if simulation_id:
@@ -472,6 +494,10 @@ def chat_with_report_agent():
                 "success": False,
                 "error": "Please provide simulation_id"
             }), 400
+        try:
+            validate_simulation_id(simulation_id)
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
 
         if not message:
             return jsonify({

@@ -14,6 +14,7 @@ from flask import request, jsonify, send_file, current_app
 
 from . import simulation_bp
 from ..utils.llm_client import create_smart_llm_client
+from ..utils.validation import validate_simulation_id
 from ..config import Config
 from ..services.entity_reader import EntityReader
 from ..services.oasis_profile_generator import OasisProfileGenerator
@@ -24,6 +25,33 @@ from ..utils.logger import get_logger
 from ..models.project import ProjectManager
 
 logger = get_logger('miroshark.api.simulation')
+
+
+@simulation_bp.before_request
+def _validate_url_simulation_id():
+    """Reject requests whose URL-derived simulation_id could cause path traversal."""
+    from flask import request as _req
+    sim_id = _req.view_args.get('simulation_id') if _req.view_args else None
+    if sim_id is not None:
+        try:
+            validate_simulation_id(sim_id)
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+
+
+def _get_simulation_id_or_400(data: dict) -> tuple:
+    """Extract and validate simulation_id from POST body.
+
+    Returns (simulation_id, None) on success or (None, error_response) on failure.
+    """
+    simulation_id = data.get('simulation_id')
+    if not simulation_id:
+        return None, (jsonify({"success": False, "error": "Please provide simulation_id"}), 400)
+    try:
+        validate_simulation_id(simulation_id)
+    except ValueError as exc:
+        return None, (jsonify({"success": False, "error": str(exc)}), 400)
+    return simulation_id, None
 
 
 # Interview prompt optimization prefix
@@ -499,13 +527,10 @@ def prepare_simulation():
     try:
         data = request.get_json() or {}
         
-        simulation_id = data.get('simulation_id')
-        if not simulation_id:
-            return jsonify({
-                "success": False,
-                "error": "Please provide simulation_id"
-            }), 400
-        
+        simulation_id, err = _get_simulation_id_or_400(data)
+        if err:
+            return err
+
         manager = SimulationManager()
         state = manager.get_simulation(simulation_id)
         
@@ -770,7 +795,12 @@ def get_prepare_status():
         
         task_id = data.get('task_id')
         simulation_id = data.get('simulation_id')
-        
+        if simulation_id:
+            try:
+                validate_simulation_id(simulation_id)
+            except ValueError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
+
         # If simulation_id is provided, first check if preparation is complete
         if simulation_id:
             is_prepared, prepare_info = _check_simulation_prepared(simulation_id)
@@ -1740,12 +1770,9 @@ def start_simulation():
     try:
         data = request.get_json() or {}
 
-        simulation_id = data.get('simulation_id')
-        if not simulation_id:
-            return jsonify({
-                "success": False,
-                "error": "Please provide simulation_id"
-            }), 400
+        simulation_id, err = _get_simulation_id_or_400(data)
+        if err:
+            return err
 
         platform = data.get('platform', 'parallel')
         max_rounds = data.get('max_rounds')  # Optional: maximum simulation rounds
@@ -1934,13 +1961,10 @@ def stop_simulation():
     try:
         data = request.get_json() or {}
         
-        simulation_id = data.get('simulation_id')
-        if not simulation_id:
-            return jsonify({
-                "success": False,
-                "error": "Please provide simulation_id"
-            }), 400
-        
+        simulation_id, err = _get_simulation_id_or_400(data)
+        if err:
+            return err
+
         run_state = SimulationRunner.stop_simulation(simulation_id)
         
         # Update simulation status
@@ -2659,17 +2683,13 @@ def interview_agent():
     try:
         data = request.get_json() or {}
         
-        simulation_id = data.get('simulation_id')
+        simulation_id, err = _get_simulation_id_or_400(data)
+        if err:
+            return err
         agent_id = data.get('agent_id')
         prompt = data.get('prompt')
         platform = data.get('platform')  # Optional: twitter/reddit/None
         timeout = data.get('timeout', 60)
-        
-        if not simulation_id:
-            return jsonify({
-                "success": False,
-                "error": "Please provide simulation_id"
-            }), 400
         
         if agent_id is None:
             return jsonify({
@@ -2781,16 +2801,12 @@ def interview_agents_batch():
     try:
         data = request.get_json() or {}
 
-        simulation_id = data.get('simulation_id')
+        simulation_id, err = _get_simulation_id_or_400(data)
+        if err:
+            return err
         interviews = data.get('interviews')
         platform = data.get('platform')  # Optional: twitter/reddit/None
         timeout = data.get('timeout', 120)
-
-        if not simulation_id:
-            return jsonify({
-                "success": False,
-                "error": "Please provide simulation_id"
-            }), 400
 
         if not interviews or not isinstance(interviews, list):
             return jsonify({
@@ -2909,16 +2925,12 @@ def get_interview_history():
     try:
         data = request.get_json() or {}
         
-        simulation_id = data.get('simulation_id')
+        simulation_id, err = _get_simulation_id_or_400(data)
+        if err:
+            return err
         platform = data.get('platform')  # If not specified, return history for both platforms
         agent_id = data.get('agent_id')
         limit = data.get('limit', 100)
-        
-        if not simulation_id:
-            return jsonify({
-                "success": False,
-                "error": "Please provide simulation_id"
-            }), 400
 
         history = SimulationRunner.get_interview_history(
             simulation_id=simulation_id,
@@ -2971,13 +2983,9 @@ def get_env_status():
     try:
         data = request.get_json() or {}
         
-        simulation_id = data.get('simulation_id')
-        
-        if not simulation_id:
-            return jsonify({
-                "success": False,
-                "error": "Please provide simulation_id"
-            }), 400
+        simulation_id, err = _get_simulation_id_or_400(data)
+        if err:
+            return err
 
         env_alive = SimulationRunner.check_env_alive(simulation_id)
         
@@ -3017,10 +3025,9 @@ def restart_env():
     """
     try:
         data = request.get_json() or {}
-        simulation_id = data.get('simulation_id')
-
-        if not simulation_id:
-            return jsonify({"success": False, "error": "Please provide simulation_id"}), 400
+        simulation_id, err = _get_simulation_id_or_400(data)
+        if err:
+            return err
 
         # Check if env is already alive
         if SimulationRunner.check_env_alive(simulation_id):
@@ -3094,14 +3101,10 @@ def close_simulation_env():
     try:
         data = request.get_json() or {}
         
-        simulation_id = data.get('simulation_id')
+        simulation_id, err = _get_simulation_id_or_400(data)
+        if err:
+            return err
         timeout = data.get('timeout', 30)
-        
-        if not simulation_id:
-            return jsonify({
-                "success": False,
-                "error": "Please provide simulation_id"
-            }), 400
         
         result = SimulationRunner.close_simulation_env(
             simulation_id=simulation_id,
