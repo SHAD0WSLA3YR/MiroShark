@@ -3743,3 +3743,346 @@ Return only the article text in Markdown format. Use ## for section headings. Do
             "error": str(e),
             "traceback": traceback.format_exc()
         }), 500
+
+
+# ============== Trace Interview ==============
+
+
+def _build_agent_trace(simulation_id: str, agent_name: str) -> dict:
+    """
+    Build a per-round trace of an agent's simulation activity from action JSONL logs.
+
+    Returns:
+        {
+            'rounds': {round_num: {'posts': [...], 'other_actions': [...]}},
+            'total_posts': int,
+            'total_engagements_received': int,
+            'platforms': [str, ...]
+        }
+    """
+    sim_dir = os.path.join(Config.WONDERWALL_SIMULATION_DATA_DIR, simulation_id)
+
+    rounds: dict = {}
+    total_posts = 0
+    total_engagements = 0
+    platforms_active: set = set()
+
+    ENGAGEMENT_TYPES = frozenset({
+        'LIKE_POST', 'REPOST', 'QUOTE_POST', 'LIKE_COMMENT', 'CREATE_COMMENT',
+    })
+
+    for platform in ('twitter', 'reddit'):
+        actions_path = os.path.join(sim_dir, platform, 'actions.jsonl')
+        if not os.path.exists(actions_path):
+            continue
+
+        with open(actions_path, 'r', encoding='utf-8') as fh:
+            for raw_line in fh:
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    continue
+                try:
+                    event = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    continue
+
+                if event.get('event_type') in (
+                    'simulation_start', 'round_start', 'round_end', 'simulation_end'
+                ):
+                    continue
+
+                round_num = event.get('round', 0)
+
+                # Track this agent's own actions
+                if event.get('agent_name') == agent_name:
+                    platforms_active.add(platform)
+                    if round_num not in rounds:
+                        rounds[round_num] = {'posts': [], 'other_actions': []}
+
+                    action_type = event.get('action_type', '')
+                    args = event.get('action_args') or {}
+
+                    if action_type == 'CREATE_POST':
+                        content = args.get('content', '')
+                        rounds[round_num]['posts'].append({
+                            'platform': platform,
+                            'content': content,
+                        })
+                        total_posts += 1
+                    elif action_type and action_type != 'DO_NOTHING':
+                        rounds[round_num]['other_actions'].append({
+                            'platform': platform,
+                            'type': action_type,
+                        })
+
+                # Track engagements received by this agent
+                elif event.get('action_type') in ENGAGEMENT_TYPES:
+                    args = event.get('action_args') or {}
+                    target = (
+                        args.get('post_author_name')
+                        or args.get('original_author_name')
+                    )
+                    if target == agent_name:
+                        total_engagements += 1
+
+    return {
+        'rounds': rounds,
+        'total_posts': total_posts,
+        'total_engagements_received': total_engagements,
+        'platforms': sorted(platforms_active),
+    }
+
+
+@simulation_bp.route('/<simulation_id>/agents/<agent_name>/trace-interview', methods=['POST'])
+def trace_interview_agent(simulation_id: str, agent_name: str):
+    """
+    Post-simulation trace-grounded agent interview.
+
+    Does NOT require the simulation environment to be running. Works on completed
+    simulations by injecting the agent's round-by-round simulation trace as LLM context,
+    enabling questions like "Why did you change your position in round 4?".
+
+    Supports multi-turn: pass previous Q&A in the 'history' field to continue the
+    conversation with full context.
+
+    Request body (JSON):
+        {
+            "question": "Why did you post so aggressively in round 3?",
+            "history": [                        // Optional: prior Q&A for multi-turn
+                {"role": "user", "content": "..."},
+                {"role": "assistant", "content": "..."}
+            ]
+        }
+
+    Returns:
+        {
+            "success": true,
+            "data": {
+                "agent_name": "AgentName",
+                "question": "...",
+                "answer": "...",
+                "total_qa": 3           // total Q&A pairs saved for this agent
+            }
+        }
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        question = (body.get('question') or '').strip()
+        history = body.get('history') or []
+
+        if not question:
+            return jsonify({"success": False, "error": "Please provide a question"}), 400
+
+        sim_dir = os.path.join(Config.WONDERWALL_SIMULATION_DATA_DIR, simulation_id)
+        if not os.path.exists(sim_dir):
+            return jsonify({"success": False, "error": f"Simulation not found: {simulation_id}"}), 404
+
+        # --- Get simulation scenario ---
+        scenario = ''
+        config = SimulationManager().get_simulation_config(simulation_id)
+        if config:
+            scenario = config.get('simulation_requirement', '') or ''
+
+        # --- Get agent profile ---
+        profile_lines = []
+        profiles_file = os.path.join(sim_dir, 'reddit_profiles.json')
+        if os.path.exists(profiles_file):
+            try:
+                with open(profiles_file, 'r', encoding='utf-8') as f:
+                    profiles = json.load(f)
+                for p in profiles:
+                    pname = p.get('user_name') or p.get('username') or p.get('name') or ''
+                    if pname.lower() == agent_name.lower():
+                        bio = p.get('bio', '')
+                        persona = p.get('persona', '')
+                        profession = p.get('profession', '')
+                        topics = p.get('interested_topics', [])
+                        age = p.get('age', '')
+                        country = p.get('country', '')
+
+                        if bio:
+                            profile_lines.append(f"Bio: {bio}")
+                        if persona and isinstance(persona, str):
+                            profile_lines.append(f"Persona: {persona[:300]}")
+                        elif persona and isinstance(persona, dict):
+                            if persona.get('archetype'):
+                                profile_lines.append(f"Archetype: {persona['archetype']}")
+                            if persona.get('bio'):
+                                profile_lines.append(f"Persona bio: {persona['bio'][:200]}")
+                        if profession:
+                            profile_lines.append(f"Profession: {profession}")
+                        if topics:
+                            profile_lines.append(f"Interested topics: {', '.join(str(t) for t in topics[:6])}")
+                        if age:
+                            profile_lines.append(f"Age: {age}")
+                        if country:
+                            profile_lines.append(f"Country: {country}")
+                        break
+            except Exception as e:
+                logger.warning(f"Could not load profile for {agent_name}: {e}")
+
+        profile_summary = '\n'.join(profile_lines) if profile_lines else 'No profile data available.'
+
+        # --- Build simulation trace ---
+        trace = _build_agent_trace(simulation_id, agent_name)
+
+        trace_lines = []
+        for round_num in sorted(trace['rounds'].keys()):
+            round_data = trace['rounds'][round_num]
+            posts = round_data.get('posts', [])
+            other_actions = round_data.get('other_actions', [])
+
+            for post in posts:
+                content = post['content'][:250] if post['content'] else ''
+                if content:
+                    trace_lines.append(f"Round {round_num} [{post['platform']}] POST: \"{content}\"")
+
+            if other_actions:
+                action_types = ', '.join(sorted({a['type'] for a in other_actions}))
+                trace_lines.append(f"Round {round_num}: {action_types}")
+
+        if not trace_lines:
+            trace_text = "No recorded actions found for this agent in this simulation."
+        else:
+            trace_text = '\n'.join(trace_lines)
+
+        # --- Build LLM messages ---
+        system_content = (
+            f"You are {agent_name}, an AI agent who just participated in a multi-agent "
+            f"social media simulation about: \"{scenario or 'a prediction scenario'}\".\n\n"
+            f"Your profile:\n{profile_summary}\n\n"
+            f"Here is everything you did during the simulation, round by round:\n{trace_text}\n\n"
+            f"Answer questions about your simulation experience IN CHARACTER as {agent_name}. "
+            f"Cite specific posts you made and actions you took. Reference exact round numbers "
+            f"when relevant. Be concise (2-4 paragraphs), specific, and stay true to your persona."
+        )
+
+        messages = [{"role": "system", "content": system_content}]
+
+        # Append validated conversation history for multi-turn support
+        for msg in history:
+            if (
+                isinstance(msg, dict)
+                and msg.get('role') in ('user', 'assistant')
+                and isinstance(msg.get('content'), str)
+                and msg['content'].strip()
+            ):
+                messages.append({"role": msg['role'], "content": msg['content']})
+
+        messages.append({"role": "user", "content": question})
+
+        # --- LLM call ---
+        llm = create_smart_llm_client(timeout=90.0)
+        answer = llm.chat(messages=messages, temperature=0.75, max_tokens=800)
+
+        # --- Persist transcript ---
+        interviews_dir = os.path.join(sim_dir, 'interviews')
+        os.makedirs(interviews_dir, exist_ok=True)
+
+        safe_name = ''.join(c if c.isalnum() or c in '-_.' else '_' for c in agent_name)
+        transcript_path = os.path.join(interviews_dir, f'{safe_name}.json')
+
+        transcript = []
+        if os.path.exists(transcript_path):
+            try:
+                with open(transcript_path, 'r', encoding='utf-8') as f:
+                    existing = json.load(f)
+                    transcript = existing.get('qa_pairs', [])
+            except Exception:
+                pass
+
+        transcript.append({
+            'question': question,
+            'answer': answer,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        })
+
+        try:
+            with open(transcript_path, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'agent_name': agent_name,
+                    'simulation_id': simulation_id,
+                    'qa_pairs': transcript,
+                    'last_updated': datetime.now(timezone.utc).isoformat(),
+                }, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save interview transcript for {agent_name}: {e}")
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "agent_name": agent_name,
+                "question": question,
+                "answer": answer,
+                "total_qa": len(transcript),
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Trace interview failed for {agent_name} in {simulation_id}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+
+@simulation_bp.route('/<simulation_id>/interviews/<agent_name>', methods=['GET'])
+def get_agent_interview_transcript(simulation_id: str, agent_name: str):
+    """
+    Retrieve the saved interview transcript for an agent.
+
+    Returns the full list of Q&A pairs previously saved for this agent,
+    or an empty transcript if none exists yet.
+
+    Returns:
+        {
+            "success": true,
+            "data": {
+                "agent_name": "AgentName",
+                "qa_pairs": [
+                    {"question": "...", "answer": "...", "timestamp": "..."},
+                    ...
+                ],
+                "total_qa": 3
+            }
+        }
+    """
+    try:
+        sim_dir = os.path.join(Config.WONDERWALL_SIMULATION_DATA_DIR, simulation_id)
+        if not os.path.exists(sim_dir):
+            return jsonify({"success": False, "error": f"Simulation not found: {simulation_id}"}), 404
+
+        safe_name = ''.join(c if c.isalnum() or c in '-_.' else '_' for c in agent_name)
+        transcript_path = os.path.join(sim_dir, 'interviews', f'{safe_name}.json')
+
+        if not os.path.exists(transcript_path):
+            return jsonify({
+                "success": True,
+                "data": {
+                    "agent_name": agent_name,
+                    "qa_pairs": [],
+                    "total_qa": 0,
+                }
+            })
+
+        with open(transcript_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        qa_pairs = data.get('qa_pairs', [])
+        return jsonify({
+            "success": True,
+            "data": {
+                "agent_name": agent_name,
+                "qa_pairs": qa_pairs,
+                "total_qa": len(qa_pairs),
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to get interview transcript for {agent_name}: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500

@@ -279,3 +279,28 @@ export const generateSimulationArticle = (simulationId, options = {}) => {
   return service.post(`/api/simulation/${simulationId}/article`, options)
 }
 
+/**
+ * Post-simulation trace-grounded agent interview.
+ * Works on completed simulations without needing the env running.
+ * @param {string} simulationId
+ * @param {string} agentName
+ * @param {Object} data - { question: string, history?: [{role, content}] }
+ */
+export const traceInterviewAgent = (simulationId, agentName, data) => {
+  return service.post(
+    `/api/simulation/${simulationId}/agents/${encodeURIComponent(agentName)}/trace-interview`,
+    data
+  )
+}
+
+/**
+ * Get saved interview transcript for an agent.
+ * @param {string} simulationId
+ * @param {string} agentName
+ */
+export const getAgentInterview = (simulationId, agentName) => {
+  return service.get(
+    `/api/simulation/${simulationId}/interviews/${encodeURIComponent(agentName)}`
+  )
+}
+

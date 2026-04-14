@@ -16,6 +16,80 @@
       </button>
     </div>
 
+    <!-- Interview Modal -->
+    <teleport to="body">
+      <div v-if="interviewAgent" class="iv-overlay" @click.self="closeInterview">
+        <div class="iv-modal">
+          <!-- Modal Header -->
+          <div class="iv-header">
+            <div class="iv-agent-info">
+              <div class="iv-avatar">{{ interviewAgent.agent_name[0].toUpperCase() }}</div>
+              <div>
+                <div class="iv-name">{{ interviewAgent.agent_name }}</div>
+                <div class="iv-meta">
+                  Rank #{{ interviewAgent.rank }} · {{ interviewAgent.influence_score }} pts
+                  · {{ interviewAgent.posts_created }} posts
+                </div>
+              </div>
+            </div>
+            <button class="iv-close" @click="closeInterview">✕</button>
+          </div>
+
+          <!-- Chat thread -->
+          <div class="iv-thread" ref="threadEl">
+            <div v-if="!interviewHistory.length && !interviewLoading" class="iv-empty">
+              Ask {{ interviewAgent.agent_name }} about their simulation experience.
+              Try: "Why did you post so much in the early rounds?" or "What changed your mind?"
+            </div>
+            <div
+              v-for="(qa, i) in interviewHistory"
+              :key="i"
+              class="iv-qa-pair"
+            >
+              <div class="iv-question">
+                <span class="iv-role">You</span>
+                <span class="iv-text">{{ qa.question }}</span>
+              </div>
+              <div class="iv-answer">
+                <span class="iv-role agent">{{ interviewAgent.agent_name }}</span>
+                <span class="iv-text">{{ qa.answer }}</span>
+                <button class="iv-share-btn" @click="shareQA(qa)" title="Copy for sharing">
+                  Share ↗
+                </button>
+              </div>
+            </div>
+            <div v-if="interviewLoading" class="iv-thinking">
+              <div class="iv-dots"><span></span><span></span><span></span></div>
+              <span>{{ interviewAgent.agent_name }} is thinking...</span>
+            </div>
+          </div>
+
+          <!-- Input -->
+          <div class="iv-input-row">
+            <input
+              ref="questionInput"
+              v-model="interviewQuestion"
+              class="iv-input"
+              type="text"
+              placeholder="Ask a question..."
+              :disabled="interviewLoading"
+              @keydown.enter.prevent="submitQuestion"
+            />
+            <button
+              class="iv-send"
+              :disabled="interviewLoading || !interviewQuestion.trim()"
+              @click="submitQuestion"
+            >
+              Ask
+            </button>
+          </div>
+
+          <!-- Error -->
+          <div v-if="interviewError" class="iv-error">{{ interviewError }}</div>
+        </div>
+      </div>
+    </teleport>
+
     <!-- Score legend -->
     <div class="lb-legend">
       <span class="legend-item"><span class="legend-dot engage"></span>Engagement ×3</span>
@@ -90,6 +164,15 @@
             ></div>
           </div>
         </div>
+
+        <!-- Interview button -->
+        <button
+          class="iv-btn"
+          @click.stop="openInterview(agent)"
+          title="Interview this agent about their simulation"
+        >
+          ▶ Interview
+        </button>
       </div>
     </div>
 
@@ -101,8 +184,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
-import { getInfluenceLeaderboard } from '../api/simulation'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { getInfluenceLeaderboard, traceInterviewAgent, getAgentInterview } from '../api/simulation'
 
 const props = defineProps({
   simulationId: { type: String, required: true },
@@ -113,6 +196,15 @@ const loading = ref(false)
 const error = ref('')
 const agents = ref([])
 const totalAgents = ref(0)
+
+// Interview state
+const interviewAgent = ref(null)
+const interviewHistory = ref([])
+const interviewQuestion = ref('')
+const interviewLoading = ref(false)
+const interviewError = ref('')
+const threadEl = ref(null)
+const questionInput = ref(null)
 
 const maxScore = computed(() =>
   agents.value.length ? agents.value[0].influence_score : 1
@@ -155,6 +247,89 @@ const exportReport = () => {
   a.download = `influence-report-${props.simulationId}.json`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+// ── Interview ──
+
+const openInterview = async (agent) => {
+  interviewAgent.value = agent
+  interviewHistory.value = []
+  interviewQuestion.value = ''
+  interviewError.value = ''
+
+  // Load existing transcript
+  try {
+    const res = await getAgentInterview(props.simulationId, agent.agent_name)
+    if (res.data?.success && res.data.data.qa_pairs?.length) {
+      interviewHistory.value = res.data.data.qa_pairs
+    }
+  } catch (_) {
+    // No transcript yet — that's fine
+  }
+
+  await nextTick()
+  questionInput.value?.focus()
+  scrollThread()
+}
+
+const closeInterview = () => {
+  interviewAgent.value = null
+  interviewHistory.value = []
+  interviewQuestion.value = ''
+  interviewError.value = ''
+}
+
+const submitQuestion = async () => {
+  const question = interviewQuestion.value.trim()
+  if (!question || interviewLoading.value) return
+
+  interviewLoading.value = true
+  interviewError.value = ''
+  interviewQuestion.value = ''
+
+  try {
+    // Build history for multi-turn context (last 6 exchanges to keep tokens bounded)
+    const history = interviewHistory.value.slice(-6).flatMap(qa => [
+      { role: 'user', content: qa.question },
+      { role: 'assistant', content: qa.answer },
+    ])
+
+    const res = await traceInterviewAgent(props.simulationId, interviewAgent.value.agent_name, {
+      question,
+      history,
+    })
+
+    if (res.data?.success) {
+      interviewHistory.value.push({
+        question,
+        answer: res.data.data.answer,
+        timestamp: new Date().toISOString(),
+      })
+      await nextTick()
+      scrollThread()
+    } else {
+      interviewError.value = res.data?.error || 'Failed to get a response.'
+    }
+  } catch (err) {
+    interviewError.value = err.message || 'Request failed.'
+  } finally {
+    interviewLoading.value = false
+    await nextTick()
+    questionInput.value?.focus()
+  }
+}
+
+const scrollThread = () => {
+  if (threadEl.value) {
+    threadEl.value.scrollTop = threadEl.value.scrollHeight
+  }
+}
+
+const shareQA = (qa) => {
+  const name = interviewAgent.value?.agent_name || 'Agent'
+  const text = `I interviewed ${name} (AI simulation agent)\n\nQ: ${qa.question}\n\nA: ${qa.answer}`
+  const card = text.length > 280 ? text.slice(0, 277) + '...' : text
+  navigator.clipboard.writeText(card).catch(() => {})
 }
 
 // Load when becoming visible or when simulationId changes
@@ -441,6 +616,279 @@ onMounted(() => { if (props.visible) load() })
   letter-spacing: 1px;
   text-align: center;
   border-top: 1px solid rgba(10,10,10,0.05);
+  flex-shrink: 0;
+}
+
+/* ── Interview button ── */
+.iv-btn {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid rgba(10,10,10,0.15);
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  color: rgba(10,10,10,0.45);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.iv-btn:hover {
+  border-color: var(--color-green, #43C165);
+  color: var(--color-green, #43C165);
+}
+
+/* ── Interview Overlay ── */
+.iv-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10,10,10,0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.iv-modal {
+  background: #FAFAFA;
+  border: 1px solid rgba(10,10,10,0.12);
+  width: 100%;
+  max-width: 580px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono);
+  box-shadow: 0 20px 60px rgba(10,10,10,0.25);
+}
+
+/* ── Modal Header ── */
+.iv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(10,10,10,0.08);
+  flex-shrink: 0;
+}
+
+.iv-agent-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.iv-avatar {
+  width: 36px;
+  height: 36px;
+  background: rgba(10,10,10,0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(10,10,10,0.4);
+  flex-shrink: 0;
+}
+
+.iv-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--foreground, #0A0A0A);
+}
+
+.iv-meta {
+  font-size: 10px;
+  color: rgba(10,10,10,0.35);
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+
+.iv-close {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: rgba(10,10,10,0.35);
+  padding: 4px 8px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.iv-close:hover {
+  color: rgba(10,10,10,0.8);
+}
+
+/* ── Chat Thread ── */
+.iv-thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 200px;
+  max-height: 420px;
+}
+
+.iv-empty {
+  font-size: 12px;
+  color: rgba(10,10,10,0.35);
+  letter-spacing: 0.5px;
+  line-height: 1.6;
+  text-align: center;
+  padding: 24px 8px;
+}
+
+.iv-qa-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.iv-question,
+.iv-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.iv-role {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: rgba(10,10,10,0.3);
+  font-weight: 600;
+}
+
+.iv-role.agent {
+  color: var(--color-green, #43C165);
+}
+
+.iv-text {
+  font-size: 12px;
+  line-height: 1.65;
+  color: rgba(10,10,10,0.8);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.iv-answer {
+  background: rgba(10,10,10,0.02);
+  border-left: 2px solid var(--color-green, #43C165);
+  padding: 8px 10px;
+}
+
+.iv-share-btn {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: rgba(10,10,10,0.3);
+  cursor: pointer;
+  padding: 2px 0;
+  margin-top: 2px;
+  transition: color 0.15s;
+}
+
+.iv-share-btn:hover {
+  color: var(--color-orange, #FF6B1A);
+}
+
+/* ── Loading dots ── */
+.iv-thinking {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: rgba(10,10,10,0.35);
+  letter-spacing: 1px;
+  padding: 4px 0;
+}
+
+.iv-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.iv-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-orange, #FF6B1A);
+  animation: iv-bounce 1.2s ease-in-out infinite;
+}
+
+.iv-dots span:nth-child(2) { animation-delay: 0.2s; }
+.iv-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes iv-bounce {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+/* ── Input Row ── */
+.iv-input-row {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(10,10,10,0.08);
+  flex-shrink: 0;
+}
+
+.iv-input {
+  flex: 1;
+  background: rgba(10,10,10,0.03);
+  border: 1px solid rgba(10,10,10,0.12);
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--foreground, #0A0A0A);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.iv-input:focus {
+  border-color: var(--color-green, #43C165);
+}
+
+.iv-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.iv-send {
+  background: var(--color-green, #43C165);
+  border: none;
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.iv-send:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.iv-send:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ── Error ── */
+.iv-error {
+  padding: 8px 16px;
+  font-size: 11px;
+  color: var(--color-red, #e53e3e);
+  letter-spacing: 0.5px;
+  border-top: 1px solid rgba(229,62,62,0.15);
   flex-shrink: 0;
 }
 </style>
