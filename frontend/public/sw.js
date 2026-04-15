@@ -6,8 +6,6 @@
  * tab (or open a new one) and navigate to the simulation results.
  */
 
-const CACHE_NAME = 'miroshark-sw-v1'
-
 // ── Install: skip waiting so the SW activates immediately ────────────────────
 self.addEventListener('install', () => {
   self.skipWaiting()

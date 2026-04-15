@@ -4,6 +4,7 @@ Manages VAPID keys, push subscriptions, and sends Web Push notifications
 when simulations complete. Uses the pywebpush library (optional dependency).
 """
 
+import fcntl
 import os
 import json
 import base64
@@ -16,6 +17,8 @@ from ..utils.logger import get_logger
 logger = get_logger('miroshark.push_notification')
 
 _UPLOADS_DIR = os.path.join(os.path.dirname(__file__), '../../uploads')
+# SECURITY: contains the VAPID private key in plaintext. Do not expose the
+# uploads/ directory publicly (e.g. via a static file server or open bucket).
 VAPID_KEYS_PATH = os.path.join(_UPLOADS_DIR, 'vapid_keys.json')
 SUBSCRIPTIONS_DIR = os.path.join(_UPLOADS_DIR, 'push_subscriptions')
 
@@ -111,21 +114,27 @@ def save_subscription(simulation_id: str, subscription: Dict[str, Any]) -> None:
     os.makedirs(SUBSCRIPTIONS_DIR, exist_ok=True)
     path = os.path.join(SUBSCRIPTIONS_DIR, f'{simulation_id}.json')
 
-    subscriptions: List[Dict[str, Any]] = []
-    if os.path.exists(path):
+    lock_path = path + '.lock'
+    with open(lock_path, 'w') as lock_f:
+        fcntl.flock(lock_f, fcntl.LOCK_EX)
         try:
-            with open(path, 'r') as f:
-                subscriptions = json.load(f)
-        except Exception:
-            subscriptions = []
+            subscriptions: List[Dict[str, Any]] = []
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r') as f:
+                        subscriptions = json.load(f)
+                except Exception:
+                    subscriptions = []
 
-    # Remove any existing entry for this endpoint (dedup / refresh)
-    endpoint = subscription.get('endpoint', '')
-    subscriptions = [s for s in subscriptions if s.get('endpoint') != endpoint]
-    subscriptions.append({**subscription, 'saved_at': datetime.now().isoformat()})
+            # Remove any existing entry for this endpoint (dedup / refresh)
+            endpoint = subscription.get('endpoint', '')
+            subscriptions = [s for s in subscriptions if s.get('endpoint') != endpoint]
+            subscriptions.append({**subscription, 'saved_at': datetime.now().isoformat()})
 
-    with open(path, 'w') as f:
-        json.dump(subscriptions, f, indent=2)
+            with open(path, 'w') as f:
+                json.dump(subscriptions, f, indent=2)
+        finally:
+            fcntl.flock(lock_f, fcntl.LOCK_UN)
 
     logger.info(f"Stored push subscription for simulation {simulation_id}")
 

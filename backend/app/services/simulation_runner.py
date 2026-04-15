@@ -1307,6 +1307,18 @@ class SimulationRunner:
                     except Exception as e:
                         errors.append(f"Failed to delete {dir_name}/actions.jsonl: {str(e)}")
         
+        # Clean up push notification subscriptions for this simulation
+        try:
+            from .push_notification_service import SUBSCRIPTIONS_DIR
+            sub_path = os.path.join(SUBSCRIPTIONS_DIR, f'{simulation_id}.json')
+            lock_path = sub_path + '.lock'
+            for p in (sub_path, lock_path):
+                if os.path.exists(p):
+                    os.remove(p)
+                    cleaned_files.append(os.path.basename(p))
+        except Exception as e:
+            errors.append(f"Failed to clean push subscriptions: {str(e)}")
+
         # Clean up in-memory run state
         if simulation_id in cls._run_states:
             del cls._run_states[simulation_id]
