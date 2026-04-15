@@ -134,7 +134,8 @@ class EmbeddingService:
         headers = {
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/aaronjmars/MiroShark",
-            "X-Title": "MiroShark - Universal Swarm Intelligence Engine",
+            "X-OpenRouter-Title": "MiroShark - Universal Swarm Intelligence Engine",
+            "X-OpenRouter-Categories": "roleplay",
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
