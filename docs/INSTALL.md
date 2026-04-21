@@ -1,12 +1,14 @@
 # Install
 
-Five ways to run MiroShark. Pick one.
+Pick one of the paths below.
 
 | Path | GPU? | Best for |
 |---|---|---|
 | [Railway / Render](#one-click-cloud) | No | Fastest path to a live deployment |
-| [`./miroshark`](#quick-start-miroshark-launcher) | Optional | Local dev, lowest friction |
-| [Cloud API (manual)](#option-a-cloud-api-no-gpu) | No | Local Neo4j + cloud LLM |
+| [`./miroshark` (OpenRouter)](#quick-start-miroshark-launcher) | Optional | Local dev, lowest friction |
+| [Cloud API — OpenRouter](#option-a1-openrouter) | No | One key covers every slot + embeddings |
+| [Cloud API — OpenAI](#option-a2-openai) | No | You already have an OpenAI key |
+| [Cloud API — Anthropic](#option-a3-anthropic) | No | You already have an Anthropic key |
 | [Docker + Ollama](#option-b-docker--local-ollama) | Yes | Fully self-hosted, one command |
 | [Manual + Ollama](#option-c-manual--local-ollama) | Yes | Fully self-hosted, manual control |
 | [Claude Code CLI](#option-d-claude-code-no-api-key) | No | Uses your Claude Pro/Max subscription |
@@ -140,37 +142,113 @@ Open `http://localhost:3000`. First simulation in ~10 min, ~$1.20 (Cheap) to ~$3
 
 ## Option A: Cloud API (no GPU)
 
-Only Neo4j runs locally. LLM and embeddings use a cloud provider.
+Only Neo4j runs locally. LLM and embeddings use a cloud provider. Three flavours below — pick the one that matches the key you already have.
 
 ```bash
-# 1. Start Neo4j (see "Prerequisites → Installing Neo4j" above)
-brew install neo4j && brew services start neo4j    # macOS
-# sudo apt install neo4j                            # Linux
-
-# 2. Configure
+# Common prep for all three flavours
+brew install neo4j       # macOS  (Linux: sudo apt install neo4j)
 cp .env.example .env
 ```
 
-Edit `.env` — uncomment the **Cheap** or **Best** preset block in `.env.example` (both pre-written and benchmarked; see [Models](MODELS.md)) and paste in your OpenRouter key. Or set the four model slots directly:
+### Option A.1: OpenRouter
+
+One key covers every slot, including embeddings. Easiest to set up and the path benchmarked in [Models](MODELS.md).
 
 ```bash
-LLM_API_KEY=sk-or-v1-your-key
+LLM_API_KEY=sk-or-v1-YOUR_KEY
 LLM_BASE_URL=https://openrouter.ai/api/v1
 LLM_MODEL_NAME=anthropic/claude-haiku-4.5
 
+SMART_PROVIDER=openai
+SMART_API_KEY=sk-or-v1-YOUR_KEY
+SMART_BASE_URL=https://openrouter.ai/api/v1
 SMART_MODEL_NAME=anthropic/claude-sonnet-4.6
+
 NER_MODEL_NAME=google/gemini-2.0-flash-001
+NER_BASE_URL=https://openrouter.ai/api/v1
+NER_API_KEY=sk-or-v1-YOUR_KEY
+
 WONDERWALL_MODEL_NAME=google/gemini-2.0-flash-lite-001
+
+OPENAI_API_KEY=sk-or-v1-YOUR_KEY
+OPENAI_API_BASE_URL=https://openrouter.ai/api/v1
 
 EMBEDDING_PROVIDER=openai
 EMBEDDING_MODEL=openai/text-embedding-3-small
 EMBEDDING_BASE_URL=https://openrouter.ai/api
-EMBEDDING_API_KEY=sk-or-v1-your-key
+EMBEDDING_API_KEY=sk-or-v1-YOUR_KEY
 EMBEDDING_DIMENSIONS=768
 ```
 
+### Option A.2: OpenAI
+
+Use your OpenAI Platform key directly. Costs are roughly in line with the Best preset.
+
 ```bash
-npm run setup:all && npm run dev
+LLM_API_KEY=sk-proj-YOUR_KEY
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL_NAME=gpt-4o-mini
+
+SMART_PROVIDER=openai
+SMART_API_KEY=sk-proj-YOUR_KEY
+SMART_BASE_URL=https://api.openai.com/v1
+SMART_MODEL_NAME=gpt-4o                   # or gpt-4.1 for stronger reports
+
+NER_MODEL_NAME=gpt-4o-mini
+NER_BASE_URL=https://api.openai.com/v1
+NER_API_KEY=sk-proj-YOUR_KEY
+
+WONDERWALL_MODEL_NAME=gpt-4o-mini
+
+OPENAI_API_KEY=sk-proj-YOUR_KEY
+OPENAI_API_BASE_URL=https://api.openai.com/v1
+
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_API_KEY=sk-proj-YOUR_KEY
+EMBEDDING_DIMENSIONS=768                  # OpenAI truncates to this via the dimensions param
+```
+
+### Option A.3: Anthropic
+
+Use your Anthropic Console key via the OpenAI-compatible endpoint. **Anthropic doesn't offer embeddings** — point `EMBEDDING_*` at Ollama (`nomic-embed-text`, see [Option C](#option-c-manual--local-ollama)) or at an OpenAI/OpenRouter key just for embeddings.
+
+```bash
+LLM_API_KEY=sk-ant-YOUR_KEY
+LLM_BASE_URL=https://api.anthropic.com/v1/
+LLM_MODEL_NAME=claude-haiku-4-5
+
+SMART_PROVIDER=openai
+SMART_API_KEY=sk-ant-YOUR_KEY
+SMART_BASE_URL=https://api.anthropic.com/v1/
+SMART_MODEL_NAME=claude-sonnet-4-6
+
+NER_MODEL_NAME=claude-haiku-4-5
+NER_BASE_URL=https://api.anthropic.com/v1/
+NER_API_KEY=sk-ant-YOUR_KEY
+
+WONDERWALL_MODEL_NAME=claude-haiku-4-5
+
+OPENAI_API_KEY=sk-ant-YOUR_KEY
+OPENAI_API_BASE_URL=https://api.anthropic.com/v1/
+
+# Embeddings: Anthropic doesn't provide any — use local Ollama
+EMBEDDING_PROVIDER=ollama
+EMBEDDING_MODEL=nomic-embed-text
+EMBEDDING_BASE_URL=http://localhost:11434
+EMBEDDING_DIMENSIONS=768
+```
+
+> Prompt caching (`LLM_PROMPT_CACHING_ENABLED=true`) hits its sweet spot here — the ReACT report loop reuses the same system prompt across iterations, so caching meaningfully reduces the Sonnet bill.
+
+---
+
+Once `.env` is set, launch:
+
+```bash
+./miroshark
+# or, manual:  npm run setup:all && npm run dev
 ```
 
 Open `http://localhost:3000`. Backend API at `http://localhost:5001`.

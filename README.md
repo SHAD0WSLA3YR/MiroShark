@@ -102,13 +102,14 @@ Each feature is documented in **[docs/FEATURES.md](docs/FEATURES.md)**.
 </table>
 </div>
 
-<p align="center">
-  <img src="./docs/images/diagram1.jpg" alt="Diagram 1" />
-</p>
-
-<p align="center">
-  <img src="./docs/images/diagram2.jpg" alt="Diagram 2" />
-</p>
+<div align="center">
+<table>
+<tr>
+<td><img src="./docs/images/diagram1.jpg" alt="Diagram 1" width="100%"/></td>
+<td><img src="./docs/images/diagram2.jpg" alt="Diagram 2" width="100%"/></td>
+</tr>
+</table>
+</div>
 
 ## Documentation
 
