@@ -3,7 +3,6 @@ Ontology generation service
 Interface 1: Analyze text content to generate entity and relationship type definitions suitable for social simulation
 """
 
-import json
 from typing import Dict, Any, List, Optional
 from ..utils.llm_client import LLMClient, create_smart_llm_client
 

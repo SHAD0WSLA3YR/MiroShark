@@ -8,7 +8,6 @@ logic in one place instead of duplicating across scripts.
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -19,7 +18,6 @@ from wonderwall.social_agent.belief_state import (
 )
 from wonderwall.social_agent.round_analyzer import (
     RoundAnalyzer,
-    RoundSnapshot,
     SimulationTrajectory,
     update_trust_from_actions,
 )

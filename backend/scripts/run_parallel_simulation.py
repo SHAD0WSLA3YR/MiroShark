@@ -72,11 +72,9 @@ import argparse
 import asyncio
 import json
 import logging
-import multiprocessing
 import random
 import signal
 import sqlite3
-import warnings
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -1181,7 +1179,7 @@ def _mcp_dispatch_from_actions(actions, bridge, tool_agent_ids, pending_results)
             continue
         try:
             results = bridge.dispatch_calls(calls)
-        except Exception as exc:
+        except Exception:
             results = []
         if results:
             pending_results.setdefault(int(aid), []).extend(results)

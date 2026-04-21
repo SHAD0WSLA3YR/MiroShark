@@ -16,12 +16,11 @@ Env vars:
 import json
 import os
 import threading
-import time
 import uuid
 from collections import deque
 from datetime import datetime
 from queue import Queue, Empty
-from typing import Any, Dict, Generator, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from .trace_context import TraceContext
 

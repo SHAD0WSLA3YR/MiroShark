@@ -299,7 +299,7 @@ def phase4_prepare(simulation_id):
     info(f"Prepare task started: {task_id} (expected agents: {expected})")
 
     # Poll until complete — uses POST with body
-    result = poll_task(
+    poll_task(
         '/api/simulation/prepare/status', task_id,
         'Preparation',
         method='POST',
@@ -384,7 +384,7 @@ def phase6_report(simulation_id):
     info(f"Report task started: {task_id} (report_id: {report_id})")
 
     # Poll until complete
-    result = poll_task(
+    poll_task(
         '/api/report/generate/status', task_id,
         'Report generation',
         method='POST',

@@ -14,7 +14,6 @@ from openai import OpenAI
 
 from ..config import Config
 from .event_logger import EventLogger, LOG_PROMPTS
-from .trace_context import TraceContext
 
 
 def create_llm_client(
@@ -263,11 +262,9 @@ class LLMClient:
             kwargs["extra_body"] = extra
 
         t0 = time.perf_counter()
-        error_info = None
         try:
             response = self.client.chat.completions.create(**kwargs)
         except Exception as exc:
-            error_info = exc
             self._emit_llm_event(messages, None, t0, error=exc, temperature=temperature)
             raise
 

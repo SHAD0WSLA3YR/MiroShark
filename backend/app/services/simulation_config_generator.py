@@ -473,7 +473,6 @@ class SimulationConfigGenerator:
 
     def _call_llm_with_retry(self, prompt: str, system_prompt: str) -> Dict[str, Any]:
         """LLM call with retry, includes JSON fix logic"""
-        import re
 
         max_attempts = 3
         last_error = None
@@ -695,11 +694,6 @@ Field descriptions:
         entities: List[EntityNode]
     ) -> Dict[str, Any]:
         """Generate event configuration"""
-
-        # Get available entity type list for LLM reference
-        entity_types_available = list(set(
-            e.get_entity_type() or "Unknown" for e in entities
-        ))
 
         # List representative entity names for each type
         type_examples = {}

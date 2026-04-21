@@ -19,7 +19,7 @@ import os
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from wonderwall.social_agent.belief_state import BeliefState
 
@@ -421,7 +421,6 @@ class RoundAnalyzer:
 
         This provides a fallback when the rec table is empty.
         """
-        active_set = set(active_agent_ids)
         result: Dict[int, List[Dict]] = {aid: [] for aid in active_agent_ids}
 
         # Collect all posts created this round (from CREATE_POST actions)

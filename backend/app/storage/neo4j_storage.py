@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Callable
 
-from neo4j import GraphDatabase, Session as Neo4jSession
+from neo4j import GraphDatabase
 from neo4j.exceptions import (
     TransientError,
     ServiceUnavailable,

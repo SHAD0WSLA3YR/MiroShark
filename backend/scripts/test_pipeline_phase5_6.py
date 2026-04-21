@@ -337,7 +337,7 @@ def main():
     config, storage = phase5_config(graph_id, document_text)
 
     # Phase 6: 3-round simulation
-    sim_time = phase6_simulation(config, storage, graph_id)
+    phase6_simulation(config, storage, graph_id)
 
     total_elapsed = time.time() - total_t0
     banner("COMPLETE")

@@ -1087,7 +1087,6 @@ Return the sub-questions as a JSON list."""
 
         # Get all nodes
         all_nodes = self.get_all_nodes(graph_id)
-        node_map = {n.uuid: n for n in all_nodes}
         result.all_nodes = all_nodes
         result.total_nodes = len(all_nodes)
 
@@ -1103,9 +1102,6 @@ Return the sub-questions as a JSON list."""
         for edge in all_edges:
             if not edge.fact:
                 continue
-
-            source_name = node_map.get(edge.source_node_uuid, NodeInfo('', '', [], '', {})).name or edge.source_node_uuid[:8]
-            target_name = node_map.get(edge.target_node_uuid, NodeInfo('', '', [], '', {})).name or edge.target_node_uuid[:8]
 
             is_historical = edge.is_expired or edge.is_invalid
 

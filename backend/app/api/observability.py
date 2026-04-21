@@ -12,7 +12,6 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import Optional
 
 from flask import request, Response, stream_with_context
 

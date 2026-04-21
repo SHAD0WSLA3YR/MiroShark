@@ -9,7 +9,6 @@ import threading
 from flask import request, jsonify, send_file, current_app
 
 from . import report_bp
-from ..config import Config
 from ..services.report_agent import ReportAgent, ReportManager, ReportStatus
 from ..services.graph_tools import GraphToolsService
 from ..services.simulation_manager import SimulationManager

@@ -153,7 +153,7 @@ def send_push_notification(
 
     def _send() -> None:
         try:
-            from pywebpush import webpush, WebPushException
+            from pywebpush import webpush
         except ImportError:
             logger.warning("pywebpush not installed — skipping push notification")
             return

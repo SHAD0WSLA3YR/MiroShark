@@ -17,7 +17,6 @@ path then naturally hits the canonical node.
 """
 
 import difflib
-import json
 import logging
 from typing import Dict, Any, List, Optional
 

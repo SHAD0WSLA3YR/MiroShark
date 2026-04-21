@@ -10,7 +10,6 @@ Optimization improvements:
 
 import json
 import random
-import time
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -689,7 +688,6 @@ class OasisProfileGenerator:
     
     def _fix_truncated_json(self, content: str) -> str:
         """Fix truncated JSON (output truncated by max_tokens limit)"""
-        import re
         
         # If JSON is truncated, try to close it
         content = content.strip()
@@ -740,7 +738,7 @@ class OasisProfileGenerator:
                 result = json.loads(json_str)
                 result["_fixed"] = True
                 return result
-            except json.JSONDecodeError as e:
+            except json.JSONDecodeError:
                 # 5. If still failing, try more aggressive fix
                 try:
                     # Remove all control characters

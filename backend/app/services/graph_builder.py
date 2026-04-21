@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass
 
-from ..config import Config
 from ..models.task import TaskManager, TaskStatus
 from ..storage import GraphStorage
 from ..utils.event_logger import EventLogger

@@ -34,7 +34,6 @@ load_dotenv(os.path.join(_backend_dir, '..', '.env'))
 from app.config import Config
 from app.utils.file_parser import FileParser
 from app.services.text_processor import TextProcessor
-from app.utils.llm_client import create_llm_client
 from app.utils.logger import get_logger
 
 logger = get_logger('pipeline_test')
@@ -303,7 +302,7 @@ def main():
     profiles = phase4_profiles(storage, graph_id, ontology)
 
     # Phase 5: Generate Config
-    config = phase5_config(document_text, ontology, profiles)
+    phase5_config(document_text, ontology, profiles)
 
     # Summary
     total_elapsed = time.time() - total_t0

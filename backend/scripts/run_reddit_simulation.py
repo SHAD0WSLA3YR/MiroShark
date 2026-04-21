@@ -33,7 +33,6 @@ from wonderwall.social_agent.belief_state import (
 from wonderwall.social_agent.round_analyzer import (
     RoundAnalyzer,
     SimulationTrajectory,
-    update_trust_from_actions,
 )
 
 # Global variables: used for signal handling

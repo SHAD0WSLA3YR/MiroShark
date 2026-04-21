@@ -8,7 +8,6 @@ import io
 import csv
 import json
 import traceback
-import tempfile
 from datetime import datetime, timezone
 from flask import request, jsonify, send_file, current_app
 
@@ -1451,8 +1450,7 @@ def _check_simulation_prepared(simulation_id: str) -> tuple:
         if status in prepared_statuses and config_generated:
             # Get file statistics
             profiles_file = os.path.join(simulation_dir, "reddit_profiles.json")
-            config_file = os.path.join(simulation_dir, "simulation_config.json")
-            
+
             profiles_count = 0
             if os.path.exists(profiles_file):
                 with open(profiles_file, 'r', encoding='utf-8') as f:
@@ -1537,9 +1535,7 @@ def prepare_simulation():
         }
     """
     import threading
-    import os
     from ..models.task import TaskManager, TaskStatus
-    from ..config import Config
     
     try:
         data = request.get_json() or {}
@@ -1971,7 +1967,6 @@ def _get_report_id_for_simulation(simulation_id: str) -> str:
         report_id or None
     """
     import json
-    from datetime import datetime
     
     # reports directory path: backend/uploads/reports
     # __file__ is app/api/simulation.py, need to go up two levels to backend/
@@ -6123,7 +6118,6 @@ def get_interaction_network(simulation_id: str):
     computes degree centrality, bridge score, and echo chamber metrics.
     Results are cached in network.json.
     """
-    import math
 
     try:
         sim_dir = os.path.join(Config.WONDERWALL_SIMULATION_DATA_DIR, simulation_id)

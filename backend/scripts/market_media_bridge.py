@@ -200,7 +200,7 @@ class MarketMediaBridge:
             self._price_history.append(snapshot)
             self.latest_prices = snapshot
 
-        except Exception as e:
+        except Exception:
             pass  # Non-critical — simulation continues without price broadcast
 
     def get_market_prompt(self) -> str:

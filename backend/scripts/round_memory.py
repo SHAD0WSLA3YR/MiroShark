@@ -37,7 +37,6 @@ Usage in the simulation loop:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field

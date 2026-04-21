@@ -14,7 +14,6 @@ Usage:
 import json
 import os
 from collections import defaultdict
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .logger import get_logger

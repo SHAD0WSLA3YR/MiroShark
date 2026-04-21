@@ -11,12 +11,11 @@ Features:
 
 import os
 import json
-import time
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, List, Optional, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -25,11 +24,7 @@ from ..utils.llm_client import LLMClient, create_smart_llm_client
 from ..utils.logger import get_logger
 from ..utils.validation import validate_simulation_id
 from .graph_tools import (
-    GraphToolsService,
-    SearchResult,
-    InsightForgeResult,
-    PanoramaResult,
-    InterviewResult
+    GraphToolsService
 )
 
 logger = get_logger('miroshark.report_agent')
@@ -1567,7 +1562,6 @@ class ReportAgent:
         # Strategy 1 = HOLD (post stance), Strategy 2 = CONCEDE (soften).
         # Payoffs scale with own coalition size × conviction, minus loss from
         # the other side's conviction when both hold (costly conflict).
-        import math
         conv_b = abs(mean_bull)
         conv_s = abs(mean_bear)
         # Row (bull) payoffs
@@ -3187,7 +3181,6 @@ class ReportManager:
             heading_match = re.match(r'^(#{1,6})\s+(.+)$', stripped)
             
             if heading_match:
-                level = len(heading_match.group(1))
                 title_text = heading_match.group(2).strip()
                 
                 # Check if heading duplicates the section title (skip duplicates within first 5 lines)
@@ -3301,8 +3294,6 @@ class ReportManager:
 
         Assemble complete report from saved section files and clean headings
         """
-        folder = cls._get_report_folder(report_id)
-        
         # Build report header
         md_content = f"# {outline.title}\n\n"
         md_content += f"> {outline.summary}\n\n"
