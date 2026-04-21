@@ -62,6 +62,27 @@ No document and no specific article in mind? Type a question on the Home screen 
 
 Run a simulation, pause to inspect, then ask: "what if the CEO resigns in round 24?" — click **⤷ Branch** in the simulation workspace, enter a trigger round and a breaking-news injection, and MiroShark forks the simulation with the parent's full agent population. When the runner reaches the trigger round, the injection is promoted to a director event and prepended to every agent's observation prompt as a BREAKING block. Compare the branch against the original via the existing **Compare** view. Preset templates can declare `counterfactual_branches` (e.g. `ceo_resigns`, `class_action`, `rug_pull`, `sec_notice`) so the branch dialog offers one-click scenarios. The endpoint is `POST /api/simulation/branch-counterfactual`.
 
+### Director Mode (Live Event Injection)
+
+Branching forks a new timeline; **Director Mode** edits the *current* one. While a simulation is running, inject a breaking-news event that lands on every agent's next observation prompt — no fork, no restart. Useful for stress-testing a scenario ("a competitor open-sources their model", "the SEC just opened an investigation") without spending the compute of a full branch.
+
+Up to 10 events per simulation, each up to 500 characters. The UI control sits next to the run-status header; the REST path is `POST /api/simulation/<id>/director/inject` (`GET .../director/events` lists pending + consumed events). Events are persisted with the simulation state and replayed in the per-round frame API, so they show up in exports and embeds.
+
+### Preset Templates
+
+Six benchmarked scenario templates ship in `backend/app/preset_templates/` — one-click starting points that pre-fill the seed document, simulation prompt, agent mix, and (optionally) `counterfactual_branches` and `oracle_tools`:
+
+| Template | Shape of the run |
+|---|---|
+| `crypto_launch` | Token / protocol launch — analysts, retail, influencers, traders react to the TGE |
+| `corporate_crisis` | Enterprise incident (breach, product failure, exec scandal) with press + markets |
+| `political_debate` | Policy / election topic with ideological spread and media loops |
+| `product_announcement` | Keynote/feature launch — review cycle, developer reaction, consumer pickup |
+| `campus_controversy` | Student/faculty/admin dynamic around a controversial event |
+| `historical_whatif` | Counterfactual history — "what if event X hadn't happened?" |
+
+Browse them in the UI via the **Templates** gallery on the setup screen, or hit `GET /api/templates/list`. Fetch a single template with `GET /api/templates/<id>`; append `?enrich=true` to resolve any declared `oracle_tools` live against FeedOracle before returning.
+
 ### Live Oracle Data (FeedOracle MCP)
 
 Opt in to grounded seed data from the [FeedOracle MCP server](https://mcp.feedoracle.io/mcp) (484 tools across MiCA compliance, DORA assessments, macro/FRED data, DEX liquidity, sanctions, carbon markets, and more). Templates declare the tools they want:
@@ -91,6 +112,33 @@ Failed calls become `{"_error": "..."}` payloads rather than exceptions — agen
 ### Publishing for Embed
 
 `EmbedDialog` has a `Public / Private` toggle backed by `is_public` on the simulation state. Embed URLs return `403` on unpublished simulations — flip the toggle (or `POST /api/simulation/<id>/publish`) to make them publicly embeddable. Defaults to private so existing sims are unaffected.
+
+### Article Generation
+
+After a simulation finishes, click **Write Article** and MiroShark asks the Smart model to produce a 400–600-word Substack-style write-up grounded in what actually happened — key findings, market dynamics, belief shifts, and implications. The article is cached at `generated_article.json` so it doesn't re-spend tokens on reopen; pass `force_regenerate=true` to refresh. Endpoint: `POST /api/simulation/<id>/article`.
+
+### Interaction Network & Demographics
+
+Two post-simulation analytics that don't need LLM calls:
+
+- **Interaction Network** (`GET /api/simulation/<id>/interaction-network`) — builds an agent-to-agent graph from likes/reposts/replies/mentions, with degree centrality, bridge scores, and echo-chamber metrics. Cached in `network.json`. Rendered as a force-directed graph in the **InteractionNetwork** panel.
+- **Demographic Breakdown** (`GET /api/simulation/<id>/demographics`) — clusters agents into archetypes (analyst, influencer, retail, observer, …) and reports distribution + engagement per bucket. Useful for spotting which archetype is driving a narrative.
+
+### Simulation Quality Diagnostics
+
+Every run gets a health score at `GET /api/simulation/<id>/quality` — engagement density, belief coherence, agent diversity, action variance. Surfaces whether a run went the distance or collapsed into noise/silence. If coherence is low, the report is probably thin.
+
+### History Database
+
+The **HistoryDatabase** panel (accessible from any view via the database icon) is a full-featured browser for every simulation on disk — search by prompt/document/tag, filter by status, clone an existing run with its agent population, export to JSON, or delete. Backed by `GET /api/simulation/list`, `GET /api/simulation/history`, `GET /api/simulation/<id>/export`, and `POST /api/simulation/fork`.
+
+### Trace Interview (Debug)
+
+Regular persona chat shows the agent's reply. **Trace Interview** shows the full chain — observation prompt, LLM thoughts, parsed action, tool calls if any — for a single agent at a point in time. Invaluable for explaining *why* an agent said what they said when an interview answer looks off. Endpoint: `POST /api/simulation/<id>/agents/<agent_name>/trace-interview`. Past interview transcripts live at `GET /api/simulation/<id>/interviews/<agent_name>`.
+
+### Push Notifications (PWA)
+
+The frontend registers a Service Worker and can fire web-push alerts when long-running work finishes — graph build done, simulation finished, report ready. Enable it by granting notifications permission when prompted; the backend serves a VAPID key at `GET /api/simulation/push/vapid-public-key` and accepts subscriptions at `POST /api/simulation/push/subscribe`. Test with `POST /api/simulation/push/test`. Safe to ignore if you don't need it — silent no-op without an opt-in.
 
 ## Screenshots
 
@@ -293,12 +341,16 @@ docker run -d --name neo4j \
 cp .env.example .env
 ```
 
-Edit `.env` (example using OpenRouter):
+Edit `.env` — uncomment the **Cheap** or **Best** preset block in `.env.example` (both are pre-written and benchmarked) and paste in your OpenRouter key. Or set the four model slots directly:
 
 ```bash
 LLM_API_KEY=sk-or-v1-your-key
 LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_MODEL_NAME=qwen/qwen3-235b-a22b-2507
+LLM_MODEL_NAME=anthropic/claude-haiku-4.5
+
+SMART_MODEL_NAME=anthropic/claude-sonnet-4.6
+NER_MODEL_NAME=google/gemini-2.0-flash-001
+WONDERWALL_MODEL_NAME=google/gemini-2.0-flash-lite-001
 
 EMBEDDING_PROVIDER=openai
 EMBEDDING_MODEL=openai/text-embedding-3-small
@@ -323,7 +375,7 @@ cd MiroShark
 docker compose up -d
 
 # Pull models into Ollama
-docker exec miroshark-ollama ollama pull qwen3.5:27b
+docker exec miroshark-ollama ollama pull qwen2.5:32b
 docker exec miroshark-ollama ollama pull nomic-embed-text
 ```
 
@@ -342,7 +394,7 @@ docker run -d --name neo4j \
 
 # 2. Start Ollama & pull models
 ollama serve &
-ollama pull qwen3.5:27b
+ollama pull qwen2.5:32b
 ollama pull nomic-embed-text
 
 # 3. Configure & run
@@ -454,17 +506,17 @@ Claude reports, Haiku personas, cheap Wonderwall. Best report quality at reasona
 
 | Model | VRAM | Speed | Notes |
 |---|---|---|---|
-| `qwen3.5:27b` | 20GB+ | ~40 t/s | Best quality |
-| `qwen3.5:35b-a3b` *(MoE)* | 16GB | ~112 t/s | Fastest — MoE activates only 3B params |
-| `qwen3:14b` | 12GB | ~60 t/s | Solid balance |
-| `qwen3:8b` | 8GB | ~42 t/s | Minimum viable; 40K context limit |
+| `qwen2.5:32b` | 20GB+ | ~40 t/s | Default in `.env.example` — solid all-rounder |
+| `qwen3:30b-a3b` *(MoE)* | 18GB | ~110 t/s | Fastest — MoE activates only 3B params per token |
+| `qwen3:14b` | 12GB | ~60 t/s | Good balance for mid-range GPUs |
+| `qwen3:8b` | 8GB | ~42 t/s | Minimum viable; drop Wonderwall rounds if context is tight |
 
 **Hardware quick-pick:**
 
 | Setup | Model |
 |---|---|
-| RTX 3090/4090 or M2 Pro 32GB+ | `qwen3.5:27b` |
-| RTX 4080 / M2 Pro 16GB | `qwen3.5:35b-a3b` |
+| RTX 3090/4090 or M2 Pro 32GB+ | `qwen2.5:32b` |
+| RTX 4080 / M2 Pro 16GB | `qwen3:30b-a3b` |
 | RTX 4070 / M1 Pro | `qwen3:14b` |
 | 8GB VRAM / laptop | `qwen3:8b` |
 
@@ -473,7 +525,7 @@ Claude reports, Haiku personas, cheap Wonderwall. Best report quality at reasona
 **Hybrid tip:** Run local for simulation rounds (high-volume), route to Claude for reports. Most users land here naturally:
 
 ```bash
-LLM_MODEL_NAME=qwen3.5:27b
+LLM_MODEL_NAME=qwen2.5:32b
 SMART_PROVIDER=claude-code
 SMART_MODEL_NAME=claude-sonnet-4-20250514
 ```
@@ -500,7 +552,7 @@ All settings live in `.env` (copy from `.env.example`):
 LLM_PROVIDER=openai                # "openai" (default) or "claude-code"
 LLM_API_KEY=ollama
 LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL_NAME=qwen3.5:27b
+LLM_MODEL_NAME=qwen2.5:32b
 
 # Smart model (reports, ontology, graph reasoning — #1 quality lever)
 # SMART_PROVIDER=claude-code
@@ -575,6 +627,19 @@ MCP_AGENT_TOOLS_ENABLED=false
 # MCP_SERVERS_CONFIG=./config/mcp_servers.yaml
 # MCP_MAX_CALLS_PER_TURN=2
 # MCP_CALL_TIMEOUT_SEC=30
+
+# What's Trending (RSS/Atom feeds — override the default Reuters/Verge/HN/CoinDesk list)
+# TRENDING_FEEDS=https://techcrunch.com/feed/,https://www.theverge.com/rss/index.xml,https://hnrss.org/frontpage,https://www.coindesk.com/arc/outboundfeeds/rss/
+
+# Wonderwall / CAMEL-AI — the simulation engine reads these directly.
+# When LLM_PROVIDER=openai they usually match LLM_*. Leave as-is for Ollama.
+OPENAI_API_KEY=ollama
+OPENAI_API_BASE_URL=http://localhost:11434/v1
+
+# Observability — full prompt/response logging for debugging
+# (large JSONL files, disable in production)
+# MIROSHARK_LOG_PROMPTS=true
+# MIROSHARK_LOG_LEVEL=info          # debug|info|warn
 ```
 
 
@@ -658,6 +723,127 @@ Useful for scripting and headless workflows. Set `MIROSHARK_API_URL` to point at
 | `health` | Ping `/health` |
 
 All commands accept `--json` for scripting.
+
+## HTTP API Reference
+
+Grouped by concern. Base URL is `http://localhost:5001` in dev. Every endpoint returns JSON unless otherwise noted.
+
+### Setup & Discovery
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/simulation/suggest-scenarios` | Scenario auto-suggest (Bull / Bear / Neutral) from a document preview |
+| `GET` | `/api/simulation/trending` | Pull RSS/Atom items for the "What's Trending" panel |
+| `POST` | `/api/simulation/ask` | Just Ask — synthesize a seed briefing from a question |
+| `POST` | `/api/graph/fetch-url` | Fetch + extract text from a URL |
+| `GET` | `/api/templates/list` | Preset templates |
+| `GET` | `/api/templates/<id>?enrich=true` | Template + live FeedOracle enrichment |
+
+### Graph Build (Step 1)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/graph/ontology/generate` | NER + ontology extraction |
+| `POST` | `/api/graph/build` | Build Neo4j graph from ontology |
+| `GET` | `/api/graph/task/<task_id>` | Poll async task status |
+| `GET` | `/api/graph/data/<graph_id>` | Paginated graph nodes + edges |
+| `GET` | `/api/simulation/entities/<graph_id>` | Browse entities |
+| `GET` | `/api/simulation/entities/<graph_id>/<uuid>` | Single entity + neighborhood |
+
+### Simulation Lifecycle
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/simulation/create` | Create simulation from seed + prompt |
+| `POST` | `/api/simulation/prepare` | Kick off profile generation (Step 2) |
+| `POST` | `/api/simulation/prepare/status` | Poll Step 2 |
+| `POST` | `/api/simulation/start` | Launch Wonderwall subprocess (Step 3) |
+| `POST` | `/api/simulation/stop` | Terminate |
+| `POST` | `/api/simulation/branch-counterfactual` | Fork with counterfactual injection |
+| `POST` | `/api/simulation/fork` | Duplicate config |
+| `POST` | `/api/simulation/<id>/director/inject` | Director mode — live event injection |
+| `GET` | `/api/simulation/<id>/director/events` | List director events |
+
+### Live State & Data
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/simulation/<id>/run-status` | Current round / totals |
+| `GET` | `/api/simulation/<id>/run-status/detail` | Per-platform progress |
+| `GET` | `/api/simulation/<id>/frame/<round>` | Compact per-round snapshot |
+| `GET` | `/api/simulation/<id>/timeline` | Round-by-round summary |
+| `GET` | `/api/simulation/<id>/actions` | Raw agent action log |
+| `GET` | `/api/simulation/<id>/posts` | Paginated posts (Twitter + Reddit) |
+| `GET` | `/api/simulation/<id>/profiles` | Agent personas |
+| `GET` | `/api/simulation/<id>/profiles/realtime` | Live belief updates |
+| `GET` | `/api/simulation/<id>/polymarket/markets` | Markets + current prices |
+| `GET` | `/api/simulation/<id>/polymarket/market/<mid>/prices` | Price history |
+
+### Analytics
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/simulation/<id>/belief-drift` | Stance drift per topic per round |
+| `GET` | `/api/simulation/<id>/counterfactual` | Original vs branch comparison |
+| `GET` | `/api/simulation/<id>/agent-stats` | Per-agent engagement + posting |
+| `GET` | `/api/simulation/<id>/influence` | Influence leaderboard |
+| `GET` | `/api/simulation/<id>/interaction-network` | Agent-to-agent graph |
+| `GET` | `/api/simulation/<id>/demographics` | Archetype distribution |
+| `GET` | `/api/simulation/<id>/quality` | Run health diagnostics |
+| `POST` | `/api/simulation/compare` | Side-by-side belief comparison |
+
+### Interaction
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/simulation/interview` | Chat with one agent |
+| `POST` | `/api/simulation/interview/batch` | Ask a group in parallel |
+| `POST` | `/api/simulation/<id>/agents/<name>/trace-interview` | Chat with full reasoning trace |
+| `GET` | `/api/simulation/<id>/interviews/<name>` | Past transcripts with an agent |
+
+### Publish / Embed / Export
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/simulation/<id>/publish` | Toggle `is_public` |
+| `GET` | `/api/simulation/<id>/embed-summary` | Embed payload (public sims only) |
+| `POST` | `/api/simulation/<id>/article` | Generate a Substack-style write-up |
+| `GET` | `/api/simulation/<id>/export` | Full JSON export |
+| `GET` | `/api/simulation/list` | List simulations |
+| `GET` | `/api/simulation/history` | Simulation history / diffs |
+
+### Report Agent
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/report/generate` | Launch ReACT report agent |
+| `POST` | `/api/report/generate/status` | Poll generation |
+| `GET` | `/api/report/<id>` | Full report |
+| `GET` | `/api/report/by-simulation/<sim_id>` | Report for a simulation |
+| `GET` | `/api/report/<id>/download` | PDF export |
+| `POST` | `/api/report/chat` | Chat with report agent (re-queries graph) |
+| `GET` | `/api/report/<id>/agent-log` | Full ReACT trace |
+| `GET` | `/api/report/<id>/agent-log/stream` | SSE stream |
+| `GET` | `/api/report/<id>/console-log` | Raw LLM call logs |
+
+### Observability
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/observability/events/stream` | SSE feed |
+| `GET` | `/api/observability/events` | Event log (paginated) |
+| `GET` | `/api/observability/stats` | Aggregate stats |
+| `GET` | `/api/observability/llm-calls` | LLM call history |
+
+### Settings & Push
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` / `POST` | `/api/settings` | Runtime settings (masked keys) |
+| `POST` | `/api/settings/test-llm` | Ping configured LLM |
+| `GET` | `/api/simulation/push/vapid-public-key` | VAPID key for web push |
+| `POST` | `/api/simulation/push/subscribe` | Register a browser subscription |
+| `POST` | `/api/simulation/push/test` | Fire a test notification |
 
 ## Observability & Debugging
 
