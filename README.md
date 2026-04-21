@@ -34,7 +34,15 @@
 
 The recommended path: **one [OpenRouter](https://openrouter.ai/) key + the `./miroshark` launcher.** No GPU, no Ollama, no model downloads. First simulation ≈ 15–25 min, ~$1.20 (Cheap preset) to ~$3.50 (Best preset).
 
-**Prereqs** — Python 3.11+, Node 18+, Docker (for Neo4j), and a free [OpenRouter key](https://openrouter.ai/).
+**Prereqs** — Python 3.11+, Node 18+, Neo4j, and a free [OpenRouter key](https://openrouter.ai/).
+
+Install Neo4j (pick one — the launcher detects whichever is running):
+
+- **macOS** — `brew install neo4j && brew services start neo4j`
+- **Linux** — `sudo apt install neo4j` *(or your distro's equivalent)*
+- **Zero-install** — create a free [Neo4j Aura](https://neo4j.com/cloud/aura-free/) cloud instance and point `NEO4J_URI` / `NEO4J_PASSWORD` at it in `.env`
+
+Then:
 
 ```bash
 git clone https://github.com/aaronjmars/MiroShark.git && cd MiroShark
@@ -73,8 +81,11 @@ Each feature is documented in **[docs/FEATURES.md](docs/FEATURES.md)**.
 ## Use cases
 
 - **PR crisis testing** — simulate public reaction to a press release before publishing
-- **Trading signals** — feed financial news and observe simulated market sentiment
+- **Market reaction** — feed financial news and observe simulated trader + investor sentiment
+- **Advertisement** — test a campaign, headline, or pitch against a simulated audience before spending
 - **Policy analysis** — test draft regulations against a simulated public
+- **Life decision** — frame a personal decision (job move, relocation, launch timing) as a scenario and watch diverse personas argue it out
+- **What-if history** — rewrite a historical event and see how a population of personas re-narrates the aftermath
 - **Creative experiments** — feed a novel with a lost ending; agents write a narratively consistent conclusion
 
 ## Screenshots

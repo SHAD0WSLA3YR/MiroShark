@@ -14,7 +14,20 @@ Five ways to run MiroShark. Pick one.
 ## Prerequisites
 
 - An OpenAI-compatible API key (OpenRouter, OpenAI, Anthropic…), Ollama for local inference, **or** Claude Code CLI
-- Python 3.11+, Node.js 18+, Neo4j 5.15+ **or** Docker & Docker Compose
+- Python 3.11+, Node.js 18+, Neo4j 5.15+
+
+**Installing Neo4j** (pick whichever fits your OS — the launcher detects whichever is running):
+
+- **macOS** — `brew install neo4j && brew services start neo4j`
+- **Linux** — `sudo apt install neo4j` *(or your distro's equivalent)*
+- **Zero-install** — create a free [Neo4j Aura](https://neo4j.com/cloud/aura-free/) cloud instance and set `NEO4J_URI` / `NEO4J_PASSWORD` in `.env`
+
+After first launch, set the password — MiroShark's default is `miroshark` to match `.env.example`:
+
+```bash
+# macOS / Linux native install (one-time)
+neo4j-admin dbms set-initial-password miroshark
+```
 
 ## Hardware
 
@@ -128,11 +141,9 @@ Open `http://localhost:3000`. First simulation ≈ 15–25 min, ~$1.20 (Cheap) t
 Only Neo4j runs locally. LLM and embeddings use a cloud provider.
 
 ```bash
-# 1. Start Neo4j (or: brew install neo4j && brew services start neo4j)
-docker run -d --name neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/miroshark \
-  neo4j:5.15-community
+# 1. Start Neo4j (see "Prerequisites → Installing Neo4j" above)
+brew install neo4j && brew services start neo4j    # macOS
+# sudo apt install neo4j                            # Linux
 
 # 2. Configure
 cp .env.example .env
@@ -183,11 +194,8 @@ Open `http://localhost:3000`.
 ## Option C: Manual — local Ollama
 
 ```bash
-# 1. Start Neo4j
-docker run -d --name neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/miroshark \
-  neo4j:5.15-community
+# 1. Start Neo4j (macOS; for Linux: sudo apt install neo4j)
+brew install neo4j && brew services start neo4j
 
 # 2. Start Ollama & pull models
 ollama serve &
@@ -215,11 +223,8 @@ npm install -g @anthropic-ai/claude-code
 # 2. Log in (opens browser)
 claude
 
-# 3. Start Neo4j
-docker run -d --name neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/miroshark \
-  neo4j:5.15-community
+# 3. Start Neo4j (macOS; for Linux: sudo apt install neo4j)
+brew install neo4j && brew services start neo4j
 
 # 4. Configure
 cp .env.example .env
