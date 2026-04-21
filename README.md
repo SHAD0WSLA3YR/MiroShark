@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <strong>Universal Swarm Intelligence Engine — Run Locally or with Any Cloud API</strong><br>
+  <strong>Simulate anything, for $1 &amp; less than 10 min — Universal Swarm Intelligence Engine</strong><br>
   Upload any document (press release, policy draft, financial report) and MiroShark spawns hundreds of AI agents that simulate public reaction hour by hour — posts, arguments, trades, opinion shifts.
 </p>
 
