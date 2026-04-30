@@ -193,6 +193,10 @@ cp .env.example .env
 
 **其他部署路径** — [一键 Railway / Render](docs/INSTALL.zh-CN.md)、[Docker + Ollama](docs/INSTALL.zh-CN.md)、[手动 Ollama](docs/INSTALL.zh-CN.md)、[Claude Code CLI](docs/INSTALL.zh-CN.md) — 详见 **[docs/INSTALL.zh-CN.md](docs/INSTALL.zh-CN.md)**。
 
+<p align="center">
+  <img src="./docs/images/miroshark-cn.jpg" alt="MiroShark 中文界面" />
+</p>
+
 ### 主要功能
 
 | 功能 | 说明 |
